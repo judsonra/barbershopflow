@@ -117,7 +117,10 @@ func (r *Repository) UpdateCustomerPhone(ctx context.Context, tenantID, customer
 	return nil
 }
 
-func (r *Repository) ListAppointments(ctx context.Context, tenantID string, from, to time.Time) ([]domain.Appointment, error) {
+// ListAppointments returns the tenant's agenda in [from, to). When
+// customerID is non-empty (a client listing their own appointments), it
+// only returns that customer's appointments; staff pass "" to see everyone.
+func (r *Repository) ListAppointments(ctx context.Context, tenantID, customerID string, from, to time.Time) ([]domain.Appointment, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT a.id, a.customer_id, c.name, a.professional_id, p.name, a.service_id, s.name,
 		       a.starts_at, a.ends_at, a.status, a.notes, a.price_cents, a.created_at
@@ -125,7 +128,9 @@ func (r *Repository) ListAppointments(ctx context.Context, tenantID string, from
 		JOIN customers c ON c.id=a.customer_id
 		JOIN professionals p ON p.id=a.professional_id
 		JOIN services s ON s.id=a.service_id
-		WHERE a.tenant_id=$1 AND a.starts_at >= $2 AND a.starts_at < $3 ORDER BY a.starts_at`, tenantID, from, to)
+		WHERE a.tenant_id=$1 AND a.starts_at >= $2 AND a.starts_at < $3
+		  AND ($4 = '' OR a.customer_id::text = $4)
+		ORDER BY a.starts_at`, tenantID, from, to, customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +148,11 @@ func (r *Repository) ListAppointments(ctx context.Context, tenantID string, from
 	return items, rows.Err()
 }
 
-func (r *Repository) CreateAppointment(ctx context.Context, tenantID string, item domain.Appointment) (domain.Appointment, error) {
+// CreateAppointment inserts with the given initial status: staff-created
+// appointments always pass domain.StatusScheduled; client self-scheduling
+// passes StatusConfirmed instead when the tenant's auto-confirm setting is
+// on (see server.createAppointment).
+func (r *Repository) CreateAppointment(ctx context.Context, tenantID, status string, item domain.Appointment) (domain.Appointment, error) {
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return item, err
@@ -179,9 +188,9 @@ func (r *Repository) CreateAppointment(ctx context.Context, tenantID string, ite
 	}
 
 	item.EndsAt = item.StartsAt.Add(time.Duration(duration) * time.Minute)
-	err = tx.QueryRow(ctx, `INSERT INTO appointments(tenant_id,customer_id,professional_id,service_id,starts_at,ends_at,notes,price_cents)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,status,created_at`,
-		tenantID, item.CustomerID, item.ProfessionalID, item.ServiceID, item.StartsAt, item.EndsAt, item.Notes, item.PriceCents).
+	err = tx.QueryRow(ctx, `INSERT INTO appointments(tenant_id,customer_id,professional_id,service_id,starts_at,ends_at,notes,price_cents,status)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,status,created_at`,
+		tenantID, item.CustomerID, item.ProfessionalID, item.ServiceID, item.StartsAt, item.EndsAt, item.Notes, item.PriceCents, status).
 		Scan(&item.ID, &item.Status, &item.CreatedAt)
 	if isExclusionViolation(err) {
 		return item, domain.ErrScheduleConflict
@@ -317,12 +326,40 @@ func (r *Repository) UpsertClientCredentials(ctx context.Context, tenantID, cust
 	return item, err
 }
 
+const tenantColumns = `id, name, slug, self_scheduling_enabled, auto_confirm_appointments, active, created_at`
+
+func scanTenant(item *domain.Tenant) []any {
+	return []any{&item.ID, &item.Name, &item.Slug, &item.SelfSchedulingEnabled, &item.AutoConfirmAppointments, &item.Active, &item.CreatedAt}
+}
+
 // GetTenantBySlug is used both by tenant onboarding (uniqueness check) and
 // by OAuth self-registration to resolve the ?tenant=<slug> query param.
 func (r *Repository) GetTenantBySlug(ctx context.Context, slug string) (domain.Tenant, error) {
 	var item domain.Tenant
-	err := r.db.QueryRow(ctx, `SELECT id, name, slug, active, created_at FROM tenants WHERE slug=$1`, slug).
-		Scan(&item.ID, &item.Name, &item.Slug, &item.Active, &item.CreatedAt)
+	err := r.db.QueryRow(ctx, `SELECT `+tenantColumns+` FROM tenants WHERE slug=$1`, slug).Scan(scanTenant(&item)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return item, domain.ErrNotFound
+	}
+	return item, err
+}
+
+func (r *Repository) GetTenantByID(ctx context.Context, id string) (domain.Tenant, error) {
+	var item domain.Tenant
+	err := r.db.QueryRow(ctx, `SELECT `+tenantColumns+` FROM tenants WHERE id=$1`, id).Scan(scanTenant(&item)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return item, domain.ErrNotFound
+	}
+	return item, err
+}
+
+// UpdateTenantSettings lets a manager turn self-scheduling and
+// auto-confirmation on or off for their own barbershop.
+func (r *Repository) UpdateTenantSettings(ctx context.Context, tenantID string, selfSchedulingEnabled, autoConfirmAppointments bool) (domain.Tenant, error) {
+	var item domain.Tenant
+	err := r.db.QueryRow(ctx, `
+		UPDATE tenants SET self_scheduling_enabled=$2, auto_confirm_appointments=$3
+		WHERE id=$1 RETURNING `+tenantColumns,
+		tenantID, selfSchedulingEnabled, autoConfirmAppointments).Scan(scanTenant(&item)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item, domain.ErrNotFound
 	}
@@ -340,8 +377,8 @@ func (r *Repository) CreateTenantWithManager(ctx context.Context, tenantName, sl
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var tenant domain.Tenant
-	err = tx.QueryRow(ctx, `INSERT INTO tenants(name, slug) VALUES($1,$2) RETURNING id, name, slug, active, created_at`,
-		tenantName, slug).Scan(&tenant.ID, &tenant.Name, &tenant.Slug, &tenant.Active, &tenant.CreatedAt)
+	err = tx.QueryRow(ctx, `INSERT INTO tenants(name, slug) VALUES($1,$2) RETURNING `+tenantColumns,
+		tenantName, slug).Scan(scanTenant(&tenant)...)
 	if constraint, ok := isUniqueViolation(err); ok {
 		return domain.Tenant{}, domain.User{}, fmt.Errorf("%w: %s", domain.ErrConflict, constraint)
 	}

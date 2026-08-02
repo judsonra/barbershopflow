@@ -43,12 +43,14 @@ Há três formas de autenticar, dependendo de quem tem e-mail e quem não tem:
 | POST | `/services` | Cria serviço | `manager` |
 | GET | `/professionals` | Lista profissionais | qualquer papel |
 | POST | `/professionals` | Cria profissional | `manager` |
-| GET | `/customers` | Lista clientes | qualquer papel |
-| POST | `/customers` | Cria cliente | qualquer papel |
+| GET | `/customers` | Lista clientes | `manager` ou `professional` |
+| POST | `/customers` | Cria cliente | `manager` ou `professional` |
 | POST | `/customers/{id}/credentials` | Concede/renova acesso por celular a um cliente | `manager` ou `professional` |
-| GET | `/appointments?from=&to=` | Lista agenda no período | qualquer papel |
-| POST | `/appointments` | Cria agendamento | qualquer papel |
-| PATCH | `/appointments/{id}/status` | Altera estado | qualquer papel (profissional só no próprio agendamento) |
+| GET | `/tenant` | Configurações da própria barbearia | qualquer papel |
+| PATCH | `/tenant` | Liga/desliga autoagendamento e auto-confirmação | `manager` |
+| GET | `/appointments?from=&to=` | Lista agenda no período (`client` só vê os próprios) | qualquer papel |
+| POST | `/appointments` | Cria agendamento; `client` só se autoagendamento estiver ligado, ver "Autoagendamento" | qualquer papel |
+| PATCH | `/appointments/{id}/status` | Altera estado | `manager`/`professional` (profissional só no próprio agendamento); `client` não pode |
 
 Exemplo de login por e-mail:
 
@@ -105,6 +107,32 @@ globalmente únicos entre barbearias — uma pessoa pertence a uma única
 barbearia por vez. O isolamento que importa é o dos dados de negócio
 (serviços, profissionais, clientes, agendamentos), sempre filtrados pelo
 `tenant_id` do token.
+
+## Autoagendamento
+
+`GET /tenant` retorna as configurações da barbearia:
+
+```json
+{ "id": "uuid", "name": "...", "slug": "...", "self_scheduling_enabled": false, "auto_confirm_appointments": false, "active": true }
+```
+
+`PATCH /tenant` (só `manager`) liga/desliga os dois parâmetros independentes:
+
+```json
+{ "self_scheduling_enabled": true, "auto_confirm_appointments": false }
+```
+
+- `self_scheduling_enabled = false`: só staff cria agendamento; `client` que
+  tentar recebe `403 forbidden`.
+- `self_scheduling_enabled = true`: `client` pode criar agendamento para si
+  mesmo (o `customer_id` enviado é ignorado — a API usa sempre o cliente do
+  token). O estado inicial depende de `auto_confirm_appointments`:
+  `confirmed` se ligado, `scheduled` (pendente) se desligado. Agendamento
+  criado por staff sempre começa `scheduled`, independente dessas flags.
+- Em qualquer caso o horário já bloqueia a agenda assim que criado (mesma
+  regra de sobreposição do item 4 de "Agendamentos" em
+  [regras-de-negocio.md](regras-de-negocio.md)) — só quem confirma
+  manualmente é que muda.
 
 Exemplo de agendamento:
 

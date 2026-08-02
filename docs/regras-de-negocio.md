@@ -8,9 +8,10 @@
   opcionais. Autentica com papel `client` de duas formas: login social
   (Google/Facebook) se tiver e-mail — com autocadastro na primeira vez — ou
   celular + senha temporária se não tiver, senha essa enviada por
-  SMS/WhatsApp quando o barbeiro concede o acesso. Autoagendamento público
-  (o cliente criar o próprio horário) ainda é evolução futura, ver abaixo —
-  hoje o login do cliente serve para consultar o próprio histórico.
+  SMS/WhatsApp quando o barbeiro concede o acesso. Só enxerga os próprios
+  agendamentos (nunca a lista de clientes ou a agenda inteira da barbearia).
+  Pode sugerir o próprio horário se a barbearia habilitar o autoagendamento —
+  ver seção própria abaixo.
 - **Profissional:** barbeiro disponível para receber agendamentos. Autentica
   com papel `professional`; só pode alterar o status de agendamentos onde é o
   profissional responsável; também pode cadastrar clientes e conceder acesso
@@ -85,13 +86,31 @@ scheduled ──> confirmed ──> completed
 8. Cancelamentos liberam imediatamente o horário.
 9. Datas trafegam em ISO 8601/RFC 3339 com fuso. O banco armazena `timestamptz`.
 
+### Autoagendamento
+
+Cada barbearia liga essas duas configurações independentemente (`GET`/`PATCH
+/api/v1/tenant`, só `manager`):
+
+1. `self_scheduling_enabled`: se desligado (padrão), só staff cria
+   agendamento; cliente que tentar recebe `403`.
+2. `auto_confirm_appointments`: com autoagendamento ligado, decide o estado
+   inicial do horário sugerido pelo cliente — `confirmed` (reservado e
+   confirmado na hora) se ligado, `scheduled` (reservado, mas pendente de
+   confirmação do profissional) se desligado. Em ambos os casos o horário já
+   bloqueia a agenda (mesma exclusion constraint do item 4 acima), a única
+   diferença é se falta ou não uma confirmação manual.
+3. Agendamento criado por staff nunca é afetado por esses parâmetros — segue
+   sempre `scheduled`, como já era.
+4. Cliente só pode agendar para si mesmo: o `customer_id` do corpo da
+   requisição é ignorado, a API usa sempre o cliente autenticado.
+5. Cliente não pode alterar o status do próprio agendamento (nem confirmar,
+   nem cancelar) — isso é papel do profissional/gestor.
+
 ## Fora do MVP, mas previsto
 
-- Login, autorização por papel e recuperação de senha.
-- Multiunidade e isolamento por barbearia (tenant).
 - Jornada de trabalho, bloqueios, folgas e feriados.
 - Especialidades por profissional e preços/durações customizados.
-- Autoagendamento público, confirmação por WhatsApp/e-mail e lembretes.
+- Lembretes por WhatsApp/e-mail.
 - Sinal, pagamentos, caixa, comissões, cupons e programa de fidelidade.
 - Política configurável de cancelamento e no-show.
 - LGPD: consentimento, exportação, anonimização e trilha de auditoria.

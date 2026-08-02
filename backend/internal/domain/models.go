@@ -16,11 +16,13 @@ var (
 )
 
 type Tenant struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Slug      string    `json:"slug"`
-	Active    bool      `json:"active"`
-	CreatedAt time.Time `json:"created_at"`
+	ID                      string    `json:"id"`
+	Name                    string    `json:"name"`
+	Slug                    string    `json:"slug"`
+	SelfSchedulingEnabled   bool      `json:"self_scheduling_enabled"`
+	AutoConfirmAppointments bool      `json:"auto_confirm_appointments"`
+	Active                  bool      `json:"active"`
+	CreatedAt               time.Time `json:"created_at"`
 }
 
 const (
@@ -96,10 +98,17 @@ type Appointment struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
+const (
+	StatusScheduled = "scheduled"
+	StatusConfirmed = "confirmed"
+	StatusCompleted = "completed"
+	StatusCancelled = "cancelled"
+)
+
 func CanTransition(from, to string) bool {
 	allowed := map[string]map[string]bool{
-		"scheduled": {"confirmed": true, "cancelled": true},
-		"confirmed": {"completed": true, "cancelled": true},
+		StatusScheduled: {StatusConfirmed: true, StatusCancelled: true},
+		StatusConfirmed: {StatusCompleted: true, StatusCancelled: true},
 	}
 	return allowed[from][to]
 }

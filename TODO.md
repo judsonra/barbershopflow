@@ -32,8 +32,8 @@ atual (backend Go, frontend React/PWA, infra Docker).
 - [ ] Jornada de trabalho, bloqueios, folgas e feriados por profissional
 - [ ] Especialidades por profissional (hoje qualquer ativo faz qualquer serviço)
 - [ ] Preços/durações customizados por profissional
-- [ ] Autoagendamento público (cliente cria o próprio horário)
-- [ ] Confirmação e lembretes por WhatsApp/e-mail
+- [x] Autoagendamento público (cliente cria o próprio horário), com dois parâmetros por barbearia: `self_scheduling_enabled` (liga/desliga) e `auto_confirm_appointments` (auto-confirma ou entra pendente para o profissional confirmar manualmente) — configurável em `PATCH /api/v1/tenant`, aba "Config" no app
+- [ ] Lembretes por WhatsApp/e-mail (confirmação em si já existe via auto-confirmação ou confirmação manual acima)
 - [ ] Sinal/pagamento antecipado, caixa, comissões, cupons, fidelidade
 - [ ] Política configurável de cancelamento e no-show
 - [ ] LGPD: consentimento, exportação de dados, anonimização, trilha de auditoria

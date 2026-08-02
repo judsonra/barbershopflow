@@ -2,6 +2,10 @@ export type User = {
   id: string; name: string; email?: string; phone?: string
   role: 'manager' | 'professional' | 'client'; professional_id?: string; customer_id?: string; active: boolean
 }
+export type Tenant = {
+  id: string; name: string; slug: string
+  self_scheduling_enabled: boolean; auto_confirm_appointments: boolean; active: boolean
+}
 export type Service = { id: string; name: string; duration_minutes: number; price_cents: number; active: boolean }
 export type Professional = { id: string; name: string; phone?: string; active: boolean }
 export type Customer = { id: string; name: string; phone?: string; email?: string }

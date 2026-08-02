@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './api'
-import type { Appointment, Customer, Professional, Service, User } from './types'
+import type { Appointment, Customer, Professional, Service, Tenant, User } from './types'
 
 function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : 'Erro inesperado'
@@ -145,12 +145,14 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
 }
 
 function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
-  const [tab, setTab] = useState<'agenda' | 'new'>('agenda')
+  const isClient = user.role === 'client'
+  const [tab, setTab] = useState<'agenda' | 'new' | 'config'>('agenda')
   const [offset, setOffset] = useState(0)
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [services, setServices] = useState<Service[]>([])
   const [professionals, setProfessionals] = useState<Professional[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
+  const [tenant, setTenant] = useState<Tenant | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const bounds = useMemo(() => dayBounds(offset), [offset])
@@ -158,13 +160,15 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const [agenda, serviceList, professionalList, customerList] = await Promise.all([
-        api.appointments(bounds.from, bounds.to), api.services(), api.professionals(), api.customers()
+      const [agenda, serviceList, professionalList, tenantInfo, customerList] = await Promise.all([
+        api.appointments(bounds.from, bounds.to), api.services(), api.professionals(), api.tenant(),
+        isClient ? Promise.resolve([]) : api.customers()
       ])
-      setAppointments(agenda); setServices(serviceList); setProfessionals(professionalList); setCustomers(customerList)
+      setAppointments(agenda); setServices(serviceList); setProfessionals(professionalList)
+      setTenant(tenantInfo); setCustomers(customerList)
     } catch (err) { setError(errorMessage(err)) }
     finally { setLoading(false) }
-  }, [bounds])
+  }, [bounds, isClient])
 
   useEffect(() => { void load() }, [load])
 
@@ -181,37 +185,73 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
 
     <main>
       {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
-      {tab === 'agenda' ? <>
+      {tab === 'agenda' && <>
         <section className="date-nav">
           <button aria-label="Dia anterior" onClick={() => setOffset(v => v - 1)}>‹</button>
           <div><b>{offset === 0 ? 'Hoje' : dateTime.format(new Date(bounds.from)).split(' às')[0]}</b><small>{appointments.length} atendimento(s)</small></div>
           <button aria-label="Próximo dia" onClick={() => setOffset(v => v + 1)}>›</button>
         </section>
         {loading ? <div className="empty">Carregando agenda…</div> :
-          appointments.length === 0 ? <div className="empty"><span>✂</span><h2>Agenda livre</h2><p>Que tal criar o primeiro horário do dia?</p><button className="primary" onClick={() => setTab('new')}>Novo agendamento</button></div> :
+          appointments.length === 0 ? <div className="empty"><span>✂</span><h2>Agenda livre</h2>
+            <p>{isClient ? 'Você ainda não tem horário marcado.' : 'Que tal criar o primeiro horário do dia?'}</p>
+            {(!isClient || tenant?.self_scheduling_enabled) && <button className="primary" onClick={() => setTab('new')}>Novo agendamento</button>}
+          </div> :
           <section className="appointments">{appointments.map(item => <article className={`card ${item.status}`} key={item.id}>
             <time>{new Date(item.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</time>
             <div className="card-body">
               <div className="card-title"><h3>{item.customer_name}</h3><span>{statusLabel[item.status]}</span></div>
               <p>{item.service_name} · {item.professional_name}</p>
               <b>{money.format(item.price_cents / 100)}</b>
-              {item.status === 'scheduled' && <div className="actions"><button onClick={() => changeStatus(item, 'confirmed')}>Confirmar</button><button onClick={() => changeStatus(item, 'cancelled')}>Cancelar</button></div>}
-              {item.status === 'confirmed' && <div className="actions"><button onClick={() => changeStatus(item, 'completed')}>Concluir</button><button onClick={() => changeStatus(item, 'cancelled')}>Cancelar</button></div>}
+              {!isClient && item.status === 'scheduled' && <div className="actions"><button onClick={() => changeStatus(item, 'confirmed')}>Confirmar</button><button onClick={() => changeStatus(item, 'cancelled')}>Cancelar</button></div>}
+              {!isClient && item.status === 'confirmed' && <div className="actions"><button onClick={() => changeStatus(item, 'completed')}>Concluir</button><button onClick={() => changeStatus(item, 'cancelled')}>Cancelar</button></div>}
             </div>
           </article>)}</section>}
-      </> : <NewAppointment services={services} professionals={professionals} customers={customers} onDone={async () => { setTab('agenda'); setOffset(0); await load() }} />}
+      </>}
+      {tab === 'new' && <NewAppointment user={user} tenant={tenant} services={services} professionals={professionals} customers={customers}
+        onDone={async () => { setTab('agenda'); setOffset(0); await load() }} />}
+      {tab === 'config' && tenant && <TenantConfig tenant={tenant} onSaved={t => setTenant(t)} />}
     </main>
 
     <nav>
       <button className={tab === 'agenda' ? 'active' : ''} onClick={() => setTab('agenda')}><span>▦</span>Agenda</button>
-      <button className={tab === 'new' ? 'active add' : 'add'} onClick={() => setTab('new')}><span>＋</span>Novo</button>
+      {(!isClient || tenant?.self_scheduling_enabled) &&
+        <button className={tab === 'new' ? 'active add' : 'add'} onClick={() => setTab('new')}><span>＋</span>Novo</button>}
+      {user.role === 'manager' &&
+        <button className={tab === 'config' ? 'active' : ''} onClick={() => setTab('config')}><span>⚙</span>Config</button>}
     </nav>
   </div>
 }
 
-function NewAppointment({ services, professionals, customers, onDone }: {
-  services: Service[]; professionals: Professional[]; customers: Customer[]; onDone: () => Promise<void>
+function TenantConfig({ tenant, onSaved }: { tenant: Tenant; onSaved: (tenant: Tenant) => void }) {
+  const [selfScheduling, setSelfScheduling] = useState(tenant.self_scheduling_enabled)
+  const [autoConfirm, setAutoConfirm] = useState(tenant.auto_confirm_appointments)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function save() {
+    setSaving(true); setError('')
+    try { onSaved(await api.updateTenant({ self_scheduling_enabled: selfScheduling, auto_confirm_appointments: autoConfirm })) }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setSaving(false) }
+  }
+
+  return <section className="form-page"><span className="eyebrow">CONFIGURAÇÕES</span><h2>{tenant.name}</h2>
+    {error && <div className="alert">{error}</div>}
+    <form onSubmit={e => { e.preventDefault(); void save() }}>
+      <label className="checkbox"><input type="checkbox" checked={selfScheduling} onChange={e => setSelfScheduling(e.target.checked)} /> Permitir que clientes sugiram o próprio horário (autoagendamento)</label>
+      <label className="checkbox"><input type="checkbox" checked={autoConfirm} disabled={!selfScheduling} onChange={e => setAutoConfirm(e.target.checked)} /> Confirmar automaticamente o horário sugerido pelo cliente</label>
+      <p>{selfScheduling
+        ? (autoConfirm ? 'O horário do cliente já entra confirmado e reservado.' : 'O horário do cliente fica reservado como pendente até o profissional confirmar.')
+        : 'Só a equipe cria agendamentos.'}</p>
+      <button className="primary" disabled={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
+    </form>
+  </section>
+}
+
+function NewAppointment({ user, tenant, services, professionals, customers, onDone }: {
+  user: User; tenant: Tenant | null; services: Service[]; professionals: Professional[]; customers: Customer[]; onDone: () => Promise<void>
 }) {
+  const isClient = user.role === 'client'
   const [form, setForm] = useState({ customer_id: '', professional_id: '', service_id: '', starts_at: '', notes: '' })
   const [name, setName] = useState(''); const [phone, setPhone] = useState(''); const [grantAccess, setGrantAccess] = useState(false)
   const [list, setList] = useState(customers); const [saving, setSaving] = useState(false); const [error, setError] = useState('')
@@ -232,22 +272,26 @@ function NewAppointment({ services, professionals, customers, onDone }: {
     catch (err) { setError(errorMessage(err)) }
     finally { setSaving(false) }
   }
-  return <section className="form-page"><span className="eyebrow">NOVO HORÁRIO</span><h2>Agendar atendimento</h2>
+  const pending = isClient && tenant && !tenant.auto_confirm_appointments
+  return <section className="form-page"><span className="eyebrow">NOVO HORÁRIO</span><h2>{isClient ? 'Sugerir horário' : 'Agendar atendimento'}</h2>
     {error && <div className="alert">{error}</div>}
+    {isClient && <p>{pending ? 'O profissional precisa confirmar antes do horário ficar garantido.' : 'Seu horário é reservado assim que você confirma.'}</p>}
     <form onSubmit={submit}>
-      <label>Cliente<select required value={form.customer_id} onChange={e => setForm({ ...form, customer_id: e.target.value })}><option value="">Selecione</option>{list.map(x => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
-      <details><summary>Cadastrar cliente rápido</summary><div className="quick">
-        <input placeholder="Nome" value={name} onChange={e => setName(e.target.value)} />
-        <input placeholder="Telefone" value={phone} onChange={e => setPhone(e.target.value)} />
-        <label className="checkbox"><input type="checkbox" checked={grantAccess} onChange={e => setGrantAccess(e.target.checked)} /> Enviar acesso ao app por SMS/WhatsApp (cliente sem e-mail)</label>
-        {accessMessage && <p>{accessMessage}</p>}
-        <button type="button" onClick={() => void addCustomer()}>Adicionar</button>
-      </div></details>
+      {!isClient && <>
+        <label>Cliente<select required value={form.customer_id} onChange={e => setForm({ ...form, customer_id: e.target.value })}><option value="">Selecione</option>{list.map(x => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
+        <details><summary>Cadastrar cliente rápido</summary><div className="quick">
+          <input placeholder="Nome" value={name} onChange={e => setName(e.target.value)} />
+          <input placeholder="Telefone" value={phone} onChange={e => setPhone(e.target.value)} />
+          <label className="checkbox"><input type="checkbox" checked={grantAccess} onChange={e => setGrantAccess(e.target.checked)} /> Enviar acesso ao app por SMS/WhatsApp (cliente sem e-mail)</label>
+          {accessMessage && <p>{accessMessage}</p>}
+          <button type="button" onClick={() => void addCustomer()}>Adicionar</button>
+        </div></details>
+      </>}
       <label>Serviço<select required value={form.service_id} onChange={e => setForm({ ...form, service_id: e.target.value })}><option value="">Selecione</option>{services.filter(x => x.active).map(x => <option value={x.id} key={x.id}>{x.name} · {money.format(x.price_cents / 100)}</option>)}</select></label>
       <label>Profissional<select required value={form.professional_id} onChange={e => setForm({ ...form, professional_id: e.target.value })}><option value="">Selecione</option>{professionals.filter(x => x.active).map(x => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
       <label>Data e hora<input type="datetime-local" required value={form.starts_at} onChange={e => setForm({ ...form, starts_at: e.target.value })} /></label>
       <label>Observações<textarea rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
-      <button className="primary" disabled={saving}>{saving ? 'Salvando…' : 'Confirmar agendamento'}</button>
+      <button className="primary" disabled={saving}>{saving ? 'Salvando…' : isClient ? 'Sugerir horário' : 'Confirmar agendamento'}</button>
     </form>
   </section>
 }

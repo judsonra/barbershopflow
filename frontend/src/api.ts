@@ -1,4 +1,4 @@
-import type { Appointment, Customer, Professional, Service, User } from './types'
+import type { Appointment, Customer, Professional, Service, Tenant, User } from './types'
 
 const ACCESS_KEY = 'bf_access_token'
 const REFRESH_KEY = 'bf_refresh_token'
@@ -110,6 +110,9 @@ export const api = {
     request<{ message: string }>(`/customers/${customerId}/credentials`, { method: 'POST', body: JSON.stringify({ phone, channel }) }),
   logout: () => clearTokens(),
   me: () => request<User>('/auth/me'),
+  tenant: () => request<Tenant>('/tenant'),
+  updateTenant: (data: { self_scheduling_enabled: boolean; auto_confirm_appointments: boolean }) =>
+    request<Tenant>('/tenant', { method: 'PATCH', body: JSON.stringify(data) }),
   services: () => request<Service[]>('/services'),
   professionals: () => request<Professional[]>('/professionals'),
   customers: () => request<Customer[]>('/customers'),

@@ -26,8 +26,8 @@ type Store interface {
 	CreateCustomer(ctx context.Context, tenantID string, item domain.Customer) (domain.Customer, error)
 	GetCustomerByID(ctx context.Context, tenantID, id string) (domain.Customer, error)
 	UpdateCustomerPhone(ctx context.Context, tenantID, customerID, phone string) error
-	ListAppointments(ctx context.Context, tenantID string, from, to time.Time) ([]domain.Appointment, error)
-	CreateAppointment(ctx context.Context, tenantID string, item domain.Appointment) (domain.Appointment, error)
+	ListAppointments(ctx context.Context, tenantID, customerID string, from, to time.Time) ([]domain.Appointment, error)
+	CreateAppointment(ctx context.Context, tenantID, status string, item domain.Appointment) (domain.Appointment, error)
 	UpdateAppointmentStatus(ctx context.Context, tenantID, id, status string) (domain.Appointment, error)
 	GetAppointmentProfessionalID(ctx context.Context, tenantID, id string) (string, error)
 	GetUserByEmail(context.Context, string) (domain.User, error)
@@ -43,6 +43,8 @@ type Store interface {
 	IncrementFailedLogin(context.Context, string) (bool, error)
 	UpsertClientCredentials(ctx context.Context, tenantID, customerID, name, phone, passwordHash string) (domain.User, error)
 	GetTenantBySlug(ctx context.Context, slug string) (domain.Tenant, error)
+	GetTenantByID(ctx context.Context, id string) (domain.Tenant, error)
+	UpdateTenantSettings(ctx context.Context, tenantID string, selfSchedulingEnabled, autoConfirmAppointments bool) (domain.Tenant, error)
 	CreateTenantWithManager(ctx context.Context, tenantName, slug, managerName, email, passwordHash string) (domain.Tenant, domain.User, error)
 }
 
@@ -82,12 +84,14 @@ func New(store Store, cfg Config) http.Handler {
 
 	protected := http.NewServeMux()
 	protected.HandleFunc("GET /api/v1/auth/me", s.me)
+	protected.HandleFunc("GET /api/v1/tenant", s.getTenant)
+	protected.HandleFunc("PATCH /api/v1/tenant", s.requireRole(domain.RoleManager, s.updateTenant))
 	protected.HandleFunc("GET /api/v1/services", s.listServices)
 	protected.HandleFunc("POST /api/v1/services", s.requireRole(domain.RoleManager, s.createService))
 	protected.HandleFunc("GET /api/v1/professionals", s.listProfessionals)
 	protected.HandleFunc("POST /api/v1/professionals", s.requireRole(domain.RoleManager, s.createProfessional))
-	protected.HandleFunc("GET /api/v1/customers", s.listCustomers)
-	protected.HandleFunc("POST /api/v1/customers", s.createCustomer)
+	protected.HandleFunc("GET /api/v1/customers", s.requireStaff(s.listCustomers))
+	protected.HandleFunc("POST /api/v1/customers", s.requireStaff(s.createCustomer))
 	protected.HandleFunc("POST /api/v1/customers/{id}/credentials", s.requireStaff(s.grantCustomerAccess))
 	protected.HandleFunc("GET /api/v1/appointments", s.listAppointments)
 	protected.HandleFunc("POST /api/v1/appointments", s.createAppointment)
@@ -364,6 +368,28 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 	respond(w, user, err)
 }
 
+// getTenant is used by the client app to know whether self-scheduling is
+// available before showing the "suggest a time" flow, and by staff to see
+// their own settings.
+func (s *server) getTenant(w http.ResponseWriter, r *http.Request) {
+	claims, _ := claimsFromContext(r)
+	tenant, err := s.store.GetTenantByID(r.Context(), claims.TenantID)
+	respond(w, tenant, err)
+}
+
+func (s *server) updateTenant(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		SelfSchedulingEnabled   bool `json:"self_scheduling_enabled"`
+		AutoConfirmAppointments bool `json:"auto_confirm_appointments"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	claims, _ := claimsFromContext(r)
+	tenant, err := s.store.UpdateTenantSettings(r.Context(), claims.TenantID, body.SelfSchedulingEnabled, body.AutoConfirmAppointments)
+	respond(w, tenant, err)
+}
+
 // oauthStart redirects to the provider's consent screen. The CSRF state is
 // a self-verifying signed token (see auth.SignState) so no server-side
 // session is needed between the start and callback requests. An optional
@@ -605,20 +631,46 @@ func (s *server) listAppointments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	claims, _ := claimsFromContext(r)
-	items, err := s.store.ListAppointments(r.Context(), claims.TenantID, from, to)
+	customerFilter := ""
+	if claims.Role == domain.RoleClient {
+		customerFilter = claims.CustomerID
+	}
+	items, err := s.store.ListAppointments(r.Context(), claims.TenantID, customerFilter, from, to)
 	respond(w, items, err)
 }
+
+// createAppointment is shared by staff (booking for any customer, always
+// starts 'scheduled') and clients suggesting their own time (autoagendamento):
+// gated by the tenant's self_scheduling_enabled, forced to their own
+// customer_id, and starts 'confirmed' or 'scheduled' depending on
+// auto_confirm_appointments — see docs/regras-de-negocio.md.
 func (s *server) createAppointment(w http.ResponseWriter, r *http.Request) {
 	var item domain.Appointment
 	if !decode(w, r, &item) {
 		return
 	}
+	claims, _ := claimsFromContext(r)
+	status := domain.StatusScheduled
+	if claims.Role == domain.RoleClient {
+		tenant, err := s.store.GetTenantByID(r.Context(), claims.TenantID)
+		if err != nil {
+			handleError(w, err)
+			return
+		}
+		if !tenant.SelfSchedulingEnabled {
+			writeError(w, http.StatusForbidden, "forbidden", "autoagendamento não habilitado para esta barbearia")
+			return
+		}
+		item.CustomerID = claims.CustomerID
+		if tenant.AutoConfirmAppointments {
+			status = domain.StatusConfirmed
+		}
+	}
 	if item.CustomerID == "" || item.ProfessionalID == "" || item.ServiceID == "" || item.StartsAt.IsZero() {
 		writeError(w, 400, "validation_error", "cliente, profissional, serviço e horário são obrigatórios")
 		return
 	}
-	claims, _ := claimsFromContext(r)
-	created, err := s.store.CreateAppointment(r.Context(), claims.TenantID, item)
+	created, err := s.store.CreateAppointment(r.Context(), claims.TenantID, status, item)
 	respondCreated(w, created, err)
 }
 func (s *server) updateStatus(w http.ResponseWriter, r *http.Request) {
@@ -630,6 +682,10 @@ func (s *server) updateStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	claims, _ := claimsFromContext(r)
+	if claims.Role == domain.RoleClient {
+		writeError(w, http.StatusForbidden, "forbidden", "cliente não pode alterar o status do agendamento; aguarde a confirmação do profissional")
+		return
+	}
 	if claims.Role == domain.RoleProfessional {
 		professionalID, err := s.store.GetAppointmentProfessionalID(r.Context(), claims.TenantID, id)
 		if err != nil {
