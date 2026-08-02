@@ -19,6 +19,7 @@ type Claims struct {
 	UserID         string `json:"uid"`
 	Role           string `json:"role"`
 	ProfessionalID string `json:"professional_id,omitempty"`
+	CustomerID     string `json:"customer_id,omitempty"`
 	TokenType      string `json:"type"`
 	jwt.RegisteredClaims
 }
@@ -33,6 +34,10 @@ func NewTokenizer(secret string, accessTTL, refreshTTL time.Duration) *Tokenizer
 	return &Tokenizer{secret: []byte(secret), accessTTL: accessTTL, refreshTTL: refreshTTL}
 }
 
+// Secret exposes the signing key so it can also be used to sign the OAuth
+// state parameter — no separate secret to configure.
+func (t *Tokenizer) Secret() []byte { return t.secret }
+
 func (t *Tokenizer) GenerateAccessToken(user domain.User) (string, error) {
 	return t.generate(user, TokenTypeAccess, t.accessTTL)
 }
@@ -46,6 +51,7 @@ func (t *Tokenizer) generate(user domain.User, tokenType string, ttl time.Durati
 		UserID:         user.ID,
 		Role:           user.Role,
 		ProfessionalID: user.ProfessionalID,
+		CustomerID:     user.CustomerID,
 		TokenType:      tokenType,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   user.ID,

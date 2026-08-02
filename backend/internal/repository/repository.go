@@ -189,30 +189,172 @@ func (r *Repository) GetAppointmentProfessionalID(ctx context.Context, id string
 	return professionalID, err
 }
 
+const userColumns = `id, name, email, phone, password_hash, google_id, facebook_id, role,
+	professional_id, customer_id, failed_login_attempts, locked_at, active, created_at`
+
 func (r *Repository) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
-	return r.scanUser(r.db.QueryRow(ctx, `
-		SELECT id, name, email, password_hash, role, professional_id, active, created_at
-		FROM users WHERE lower(email)=lower($1)`, email))
+	return r.scanUser(r.db.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE lower(email)=lower($1)`, email))
+}
+
+func (r *Repository) GetUserByPhone(ctx context.Context, phone string) (domain.User, error) {
+	return r.scanUser(r.db.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE phone=$1`, phone))
+}
+
+func (r *Repository) GetUserByGoogleID(ctx context.Context, googleID string) (domain.User, error) {
+	return r.scanUser(r.db.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE google_id=$1`, googleID))
+}
+
+func (r *Repository) GetUserByFacebookID(ctx context.Context, facebookID string) (domain.User, error) {
+	return r.scanUser(r.db.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE facebook_id=$1`, facebookID))
 }
 
 func (r *Repository) GetUserByID(ctx context.Context, id string) (domain.User, error) {
-	return r.scanUser(r.db.QueryRow(ctx, `
-		SELECT id, name, email, password_hash, role, professional_id, active, created_at
-		FROM users WHERE id=$1`, id))
+	return r.scanUser(r.db.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id=$1`, id))
+}
+
+// CreateClientUser provisions a brand-new customer + login pair from a
+// social login self-registration (google/facebook id set, no password).
+func (r *Repository) CreateClientUser(ctx context.Context, item domain.User) (domain.User, error) {
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO users(name, email, phone, password_hash, google_id, facebook_id, role, customer_id)
+		VALUES($1,$2,$3,$4,$5,$6,'client',$7)
+		RETURNING `+userColumns,
+		item.Name, nullable(item.Email), nullable(item.Phone), nullable(item.PasswordHash),
+		nullable(item.GoogleID), nullable(item.FacebookID), item.CustomerID).
+		Scan(userScanTargets(&item)...)
+	return item, err
+}
+
+// LinkGoogleID attaches a Google account to an existing user (staff account
+// recovery, or a returning client).
+func (r *Repository) LinkGoogleID(ctx context.Context, userID, googleID string) error {
+	_, err := r.db.Exec(ctx, `UPDATE users SET google_id=$2 WHERE id=$1`, userID, googleID)
+	return err
+}
+
+func (r *Repository) LinkFacebookID(ctx context.Context, userID, facebookID string) error {
+	_, err := r.db.Exec(ctx, `UPDATE users SET facebook_id=$2 WHERE id=$1`, userID, facebookID)
+	return err
+}
+
+// SetPassword is used both when the barber grants a client phone access and
+// when a locked-out client recovers via a new SMS/WhatsApp password. Both
+// cases should also clear the lockout.
+func (r *Repository) SetPassword(ctx context.Context, userID, passwordHash string) error {
+	_, err := r.db.Exec(ctx, `UPDATE users SET password_hash=$2, failed_login_attempts=0, locked_at=NULL WHERE id=$1`, userID, passwordHash)
+	return err
+}
+
+func (r *Repository) ResetLoginAttempts(ctx context.Context, userID string) error {
+	_, err := r.db.Exec(ctx, `UPDATE users SET failed_login_attempts=0, locked_at=NULL WHERE id=$1`, userID)
+	return err
+}
+
+// IncrementFailedLogin records a failed password attempt and locks the
+// account once domain.MaxLoginAttempts is reached, returning whether it is
+// now locked.
+func (r *Repository) IncrementFailedLogin(ctx context.Context, userID string) (bool, error) {
+	var locked bool
+	err := r.db.QueryRow(ctx, `
+		UPDATE users SET
+			failed_login_attempts = failed_login_attempts + 1,
+			locked_at = CASE WHEN failed_login_attempts + 1 >= $2 THEN now() ELSE locked_at END
+		WHERE id=$1
+		RETURNING locked_at IS NOT NULL`, userID, domain.MaxLoginAttempts).Scan(&locked)
+	return locked, err
+}
+
+func (r *Repository) GetCustomerByID(ctx context.Context, id string) (domain.Customer, error) {
+	var item domain.Customer
+	err := r.db.QueryRow(ctx, `SELECT id, name, phone, email, created_at FROM customers WHERE id=$1`, id).
+		Scan(&item.ID, &item.Name, &item.Phone, &item.Email, &item.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return item, domain.ErrNotFound
+	}
+	return item, err
+}
+
+// UpdateCustomerPhone lets the barber fill in/correct the phone number at
+// the moment they grant the client access.
+func (r *Repository) UpdateCustomerPhone(ctx context.Context, customerID, phone string) error {
+	tag, err := r.db.Exec(ctx, `UPDATE customers SET phone=$2 WHERE id=$1`, customerID, phone)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// UpsertClientCredentials grants (or regenerates) a customer's phone-login
+// password: creates the linked user on first use, or resets its password
+// and lockout state on subsequent calls.
+func (r *Repository) UpsertClientCredentials(ctx context.Context, customerID, name, phone, passwordHash string) (domain.User, error) {
+	item := domain.User{}
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO users(name, phone, password_hash, role, customer_id)
+		VALUES($1,$2,$3,'client',$4)
+		ON CONFLICT (customer_id) WHERE customer_id IS NOT NULL DO UPDATE SET
+			name = EXCLUDED.name,
+			phone = EXCLUDED.phone,
+			password_hash = EXCLUDED.password_hash,
+			failed_login_attempts = 0,
+			locked_at = NULL
+		RETURNING `+userColumns,
+		name, phone, passwordHash, customerID).
+		Scan(userScanTargets(&item)...)
+	return item, err
+}
+
+func nullable(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func userScanTargets(item *domain.User) []any {
+	return []any{
+		&item.ID, &item.Name, &nullString{&item.Email}, &nullString{&item.Phone}, &nullString{&item.PasswordHash},
+		&nullString{&item.GoogleID}, &nullString{&item.FacebookID}, &item.Role,
+		&nullString{&item.ProfessionalID}, &nullString{&item.CustomerID},
+		&item.FailedLoginAttempts, &nullTime{&item.LockedAt}, &item.Active, &item.CreatedAt,
+	}
+}
+
+// nullString/nullTime adapt nullable Postgres columns onto the plain string
+// and time.Time fields domain.User exposes, so callers never juggle
+// sql.NullString themselves.
+type nullString struct{ dst *string }
+
+func (n *nullString) Scan(value any) error {
+	var wrapped sql.NullString
+	if err := wrapped.Scan(value); err != nil {
+		return err
+	}
+	*n.dst = wrapped.String
+	return nil
+}
+
+type nullTime struct{ dst *time.Time }
+
+func (n *nullTime) Scan(value any) error {
+	var wrapped sql.NullTime
+	if err := wrapped.Scan(value); err != nil {
+		return err
+	}
+	*n.dst = wrapped.Time
+	return nil
 }
 
 func (r *Repository) scanUser(row pgx.Row) (domain.User, error) {
 	var item domain.User
-	var professionalID sql.NullString
-	err := row.Scan(&item.ID, &item.Name, &item.Email, &item.PasswordHash, &item.Role, &professionalID, &item.Active, &item.CreatedAt)
+	err := row.Scan(userScanTargets(&item)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item, domain.ErrNotFound
 	}
-	if err != nil {
-		return item, err
-	}
-	item.ProfessionalID = professionalID.String
-	return item, nil
+	return item, err
 }
 
 func isExclusionViolation(err error) bool {

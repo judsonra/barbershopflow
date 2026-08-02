@@ -24,6 +24,15 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
       JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-168h}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      FACEBOOK_CLIENT_ID: ${FACEBOOK_CLIENT_ID:-}
+      FACEBOOK_CLIENT_SECRET: ${FACEBOOK_CLIENT_SECRET:-}
+      OAUTH_REDIRECT_BASE_URL: ${OAUTH_REDIRECT_BASE_URL:-http://localhost:8080}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      ZENVIA_API_TOKEN: ${ZENVIA_API_TOKEN:-}
+      ZENVIA_FROM_SMS: ${ZENVIA_FROM_SMS:-BarberFlow}
+      ZENVIA_FROM_WHATSAPP: ${ZENVIA_FROM_WHATSAPP:-BarberFlow}
     depends_on:
       db:
         condition: service_healthy

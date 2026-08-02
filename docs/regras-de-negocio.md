@@ -4,21 +4,30 @@
 
 ### Perfis
 
-- **Cliente:** pessoa atendida, identificada por nome, telefone e e-mail opcionais.
-  Ainda não autentica na API (autoagendamento público é evolução futura, ver
-  abaixo).
+- **Cliente:** pessoa atendida, identificada por nome, telefone e e-mail
+  opcionais. Autentica com papel `client` de duas formas: login social
+  (Google/Facebook) se tiver e-mail — com autocadastro na primeira vez — ou
+  celular + senha temporária se não tiver, senha essa enviada por
+  SMS/WhatsApp quando o barbeiro concede o acesso. Autoagendamento público
+  (o cliente criar o próprio horário) ainda é evolução futura, ver abaixo —
+  hoje o login do cliente serve para consultar o próprio histórico.
 - **Profissional:** barbeiro disponível para receber agendamentos. Autentica
   com papel `professional`; só pode alterar o status de agendamentos onde é o
-  profissional responsável.
+  profissional responsável; também pode cadastrar clientes e conceder acesso
+  por celular.
 - **Gestor/recepção:** opera catálogo, profissionais, clientes e agenda.
   Autentica com papel `manager`; único papel autorizado a cadastrar serviços e
   profissionais.
 
-Login é feito por e-mail e senha (`POST /api/v1/auth/login`), com access token
-de curta duração e refresh token, ver [docs/api.md](api.md). Recuperação de
-senha e revogação de refresh tokens ainda não existem — ver `TODO.md`. Até que
-esses fluxos existam, trate a API como administrativa e restrinja seu acesso a
-redes confiáveis.
+Staff (gestor/profissional) loga por e-mail e senha (`POST /api/v1/auth/login`)
+ou por login social com o mesmo e-mail da conta — que funciona como
+recuperação de acesso, sem precisar de "esqueci minha senha". Cliente sem
+e-mail loga por celular e senha, com rate limiting (3 tentativas erradas
+bloqueiam a conta) e recuperação via nova senha por SMS/WhatsApp
+(`POST /api/v1/auth/recover`). Detalhes em [docs/api.md](api.md). Revogação de
+refresh tokens ainda não existe — ver `TODO.md`. Até lá, trate a API
+administrativa (rotas de gestor/profissional) como sensível e restrinja seu
+acesso a redes confiáveis.
 
 ### Serviços
 

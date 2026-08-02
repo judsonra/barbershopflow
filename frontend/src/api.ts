@@ -5,6 +5,14 @@ const REFRESH_KEY = 'bf_refresh_token'
 
 let sessionExpiredHandler: (() => void) | null = null
 
+export class ApiError extends Error {
+  code?: string
+  constructor(message: string, code?: string) {
+    super(message)
+    this.code = code
+  }
+}
+
 function getAccessToken() { return localStorage.getItem(ACCESS_KEY) }
 function getRefreshToken() { return localStorage.getItem(REFRESH_KEY) }
 function storeTokens(accessToken: string, refreshToken: string) {
@@ -32,11 +40,11 @@ async function request<T>(path: string, options?: RequestInit, allowRefresh = tr
     }
     clearTokens()
     sessionExpiredHandler?.()
-    throw new Error('Sessão expirada. Faça login novamente.')
+    throw new ApiError('Sessão expirada. Faça login novamente.')
   }
   if (!response.ok) {
     const body = await response.json().catch(() => null)
-    throw new Error(body?.error?.message || 'Não foi possível concluir a operação.')
+    throw new ApiError(body?.error?.message || 'Não foi possível concluir a operação.', body?.error?.code)
   }
   if (response.status === 204) return undefined as T
   return response.json()
@@ -56,9 +64,25 @@ async function tryRefresh(): Promise<boolean> {
   }
 }
 
+// Google/Facebook finish with a full-page redirect back to `/`, carrying the
+// tokens in the URL fragment (never sent to a server, unlike a query string).
+// Call this once on app boot to pick them up.
+function consumeOAuthRedirect(): { error?: string } {
+  if (!location.hash) return {}
+  const params = new URLSearchParams(location.hash.slice(1))
+  const accessToken = params.get('access_token')
+  const refreshToken = params.get('refresh_token')
+  const error = params.get('auth_error')
+  if (accessToken && refreshToken) storeTokens(accessToken, refreshToken)
+  if (accessToken || error) history.replaceState(null, '', location.pathname + location.search)
+  return { error: error ?? undefined }
+}
+
 export const api = {
   isAuthenticated: () => Boolean(getAccessToken()),
   onSessionExpired: (handler: () => void) => { sessionExpiredHandler = handler },
+  consumeOAuthRedirect,
+  socialLoginUrl: (provider: 'google' | 'facebook') => `/api/v1/auth/${provider}/start`,
   login: async (email: string, password: string) => {
     const data = await request<{ access_token: string; refresh_token: string; user: User }>(
       '/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }
@@ -66,6 +90,17 @@ export const api = {
     storeTokens(data.access_token, data.refresh_token)
     return data.user
   },
+  loginByPhone: async (phone: string, password: string) => {
+    const data = await request<{ access_token: string; refresh_token: string; user: User }>(
+      '/auth/login', { method: 'POST', body: JSON.stringify({ phone, password }) }
+    )
+    storeTokens(data.access_token, data.refresh_token)
+    return data.user
+  },
+  recoverPhone: (phone: string, channel: 'sms' | 'whatsapp' = 'whatsapp') =>
+    request<{ message: string }>('/auth/recover', { method: 'POST', body: JSON.stringify({ phone, channel }) }),
+  grantCustomerAccess: (customerId: string, phone: string, channel: 'sms' | 'whatsapp' = 'whatsapp') =>
+    request<{ message: string }>(`/customers/${customerId}/credentials`, { method: 'POST', body: JSON.stringify({ phone, channel }) }),
   logout: () => clearTokens(),
   me: () => request<User>('/auth/me'),
   services: () => request<Service[]>('/services'),

@@ -30,4 +30,9 @@ nav button { background: none; border: 0; color: #9ca3af; display: grid; gap: 2p
 input, select, textarea { width: 100%; border: 1px solid #ddd7cc; background: white; border-radius: 11px; padding: 12px; color: #18202a; }
 details { border: 1px dashed #c8bda9; border-radius: 11px; padding: 11px; }summary { cursor: pointer; color: #906521; font-size: 13px; }.quick { display: grid; gap: 8px; margin-top: 10px; }.quick button { border: 0; border-radius: 8px; padding: 9px; background: #e9dfcf; }
 .alert { background: #fee2e2; color: #991b1b; border-radius: 11px; padding: 12px; margin-bottom: 14px; display: flex; justify-content: space-between; }.alert button { border: 0; background: none; }
+.social-login { display: grid; gap: 10px; margin-top: 16px; }
+.social-button { display: block; text-align: center; text-decoration: none; border: 1px solid #ddd7cc; border-radius: 11px; padding: 12px; color: #18202a; font-weight: 600; font-size: 14px; }
+.link-button { display: block; margin: 14px auto 0; border: 0; background: none; color: #906521; font-size: 13px; text-decoration: underline; }
+.checkbox { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; font-weight: 400 !important; }
+.checkbox input { width: auto; }
 @media (min-width: 700px) { body { padding: 24px 0; }.app-shell { min-height: calc(100dvh - 48px); border-radius: 24px; overflow: hidden; } }

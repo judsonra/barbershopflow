@@ -7,10 +7,14 @@ atual (backend Go, frontend React/PWA, infra Docker).
 ## 1. Autenticação & Autorização (bloqueador para produção)
 
 - [x] Login (usuário/senha) para gestor/recepção e profissional
-- [x] Autorização por papel: gestor/recepção e profissional (cliente ainda não autentica — depende do autoagendamento público)
+- [x] Autorização por papel: gestor/recepção e profissional (cliente ganhou login nesta etapa também, ver abaixo)
 - [x] Sessão/JWT com expiração e refresh
-- [ ] Recuperação de senha (fluxo de e-mail)
-- [ ] Rate limiting em endpoints de autenticação
+- [x] Login social (Google, Facebook) para quem tem e-mail — também funciona como recuperação de acesso de staff (entrar com o mesmo e-mail da conta) e como autocadastro de cliente na primeira vez
+- [x] Cliente sem e-mail: barbeiro cadastra nome + celular e concede acesso (`POST /customers/{id}/credentials`); senha temporária enviada por SMS/WhatsApp via Zenvia
+- [x] Rate limiting só no login por celular (sem e-mail): 3 tentativas erradas bloqueiam a conta (`423 account_locked`)
+- [x] Recuperação por celular: novo número informado recebe senha nova por SMS/WhatsApp e desbloqueia a conta
+- [ ] Zenvia real: validar o payload da API contra a documentação atual e testar com uma conta de verdade (implementado sem credenciais reais, só o fallback de log foi testado)
+- [ ] Credenciais reais de Google/Facebook OAuth (implementado e testado com `oauth_not_configured`; falta testar o fluxo completo com um app registrado em cada provedor)
 - [ ] Até o login existir, manter a API restrita a rede confiável (risco atual documentado em `docs/regras-de-negocio.md`)
 
 ## 2. Multi-tenant / multiunidade

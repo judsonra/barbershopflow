@@ -11,23 +11,39 @@ var (
 	ErrInvalidTransition  = errors.New("invalid appointment status transition")
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrForbidden          = errors.New("not allowed to perform this action")
+	ErrAccountLocked      = errors.New("account locked after too many failed login attempts")
 )
 
 const (
 	RoleManager      = "manager"
 	RoleProfessional = "professional"
+	RoleClient       = "client"
 )
 
+// MaxLoginAttempts is the number of failed password attempts allowed before
+// an account is locked. Only enforced for accounts without an e-mail (phone
+// + password login) — social login and staff accounts are not rate limited
+// this way.
+const MaxLoginAttempts = 3
+
 type User struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Email          string    `json:"email"`
-	PasswordHash   string    `json:"-"`
-	Role           string    `json:"role"`
-	ProfessionalID string    `json:"professional_id,omitempty"`
-	Active         bool      `json:"active"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID                  string    `json:"id"`
+	Name                string    `json:"name"`
+	Email               string    `json:"email,omitempty"`
+	Phone               string    `json:"phone,omitempty"`
+	PasswordHash        string    `json:"-"`
+	GoogleID            string    `json:"-"`
+	FacebookID          string    `json:"-"`
+	Role                string    `json:"role"`
+	ProfessionalID      string    `json:"professional_id,omitempty"`
+	CustomerID          string    `json:"customer_id,omitempty"`
+	FailedLoginAttempts int       `json:"-"`
+	LockedAt            time.Time `json:"-"`
+	Active              bool      `json:"active"`
+	CreatedAt           time.Time `json:"created_at"`
 }
+
+func (u User) Locked() bool { return !u.LockedAt.IsZero() }
 
 type Service struct {
 	ID              string    `json:"id"`

@@ -1,6 +1,10 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
-import { api } from './api'
+import { api, ApiError } from './api'
 import type { Appointment, Customer, Professional, Service, User } from './types'
+
+function errorMessage(err: unknown) {
+  return err instanceof Error ? err.message : 'Erro inesperado'
+}
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 const dateTime = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -15,28 +19,53 @@ function dayBounds(offset = 0) {
 export default function App() {
   const [user, setUser] = useState<User | null>(null)
   const [checkingSession, setCheckingSession] = useState(true)
+  const [oauthError, setOauthError] = useState('')
 
   useEffect(() => {
     api.onSessionExpired(() => setUser(null))
+    const { error } = api.consumeOAuthRedirect()
+    if (error) setOauthError(error)
     if (!api.isAuthenticated()) { setCheckingSession(false); return }
     api.me().then(setUser).catch(() => api.logout()).finally(() => setCheckingSession(false))
   }, [])
 
   if (checkingSession) return <div className="empty">Carregando…</div>
-  if (!user) return <Login onLogin={setUser} />
+  if (!user) return <Login onLogin={setUser} initialError={oauthError} />
   return <AgendaApp user={user} onLogout={() => { api.logout(); setUser(null) }} />
 }
 
-function Login({ onLogin }: { onLogin: (user: User) => void }) {
+type LoginMode = 'email' | 'phone' | 'recover'
+
+function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initialError?: string }) {
+  const [mode, setMode] = useState<LoginMode>('email')
   const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const [error, setError] = useState(initialError ?? '')
+  const [info, setInfo] = useState('')
   const [loading, setLoading] = useState(false)
 
-  async function submit(event: FormEvent) {
+  async function submitEmail(event: FormEvent) {
     event.preventDefault(); setLoading(true); setError('')
     try { onLogin(await api.login(email, password)) }
-    catch (err) { setError(err instanceof Error ? err.message : 'Erro inesperado') }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setLoading(false) }
+  }
+
+  async function submitPhone(event: FormEvent) {
+    event.preventDefault(); setLoading(true); setError('')
+    try { onLogin(await api.loginByPhone(phone, password)) }
+    catch (err) {
+      if (err instanceof ApiError && err.code === 'account_locked') { setMode('recover'); setError('') }
+      else setError(errorMessage(err))
+    }
+    finally { setLoading(false) }
+  }
+
+  async function submitRecover(event: FormEvent) {
+    event.preventDefault(); setLoading(true); setError(''); setInfo('')
+    try { setInfo((await api.recoverPhone(phone)).message) }
+    catch (err) { setError(errorMessage(err)) }
     finally { setLoading(false) }
   }
 
@@ -47,11 +76,39 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
     <main>
       <section className="form-page">
         {error && <div className="alert" role="alert">{error}</div>}
-        <form onSubmit={submit}>
-          <label>E-mail<input type="email" required autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} /></label>
-          <label>Senha<input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label>
-          <button className="primary" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
-        </form>
+
+        {mode === 'email' && <>
+          <form onSubmit={submitEmail}>
+            <label>E-mail<input type="email" required autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} /></label>
+            <label>Senha<input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label>
+            <button className="primary" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
+          </form>
+          <div className="social-login">
+            <a className="social-button" href={api.socialLoginUrl('google')}>Entrar com Google</a>
+            <a className="social-button" href={api.socialLoginUrl('facebook')}>Entrar com Facebook</a>
+          </div>
+          <button type="button" className="link-button" onClick={() => { setMode('phone'); setError('') }}>Sou cliente e entro com celular</button>
+        </>}
+
+        {mode === 'phone' && <>
+          <form onSubmit={submitPhone}>
+            <label>Celular<input type="tel" required autoComplete="tel" placeholder="(11) 99999-0000" value={phone} onChange={e => setPhone(e.target.value)} /></label>
+            <label>Senha<input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label>
+            <button className="primary" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
+          </form>
+          <button type="button" className="link-button" onClick={() => { setMode('recover'); setError('') }}>Esqueci minha senha</button>
+          <button type="button" className="link-button" onClick={() => { setMode('email'); setError('') }}>Entrar com e-mail</button>
+        </>}
+
+        {mode === 'recover' && <>
+          {info
+            ? <p>{info}</p>
+            : <form onSubmit={submitRecover}>
+                <label>Celular cadastrado<input type="tel" required autoComplete="tel" placeholder="(11) 99999-0000" value={phone} onChange={e => setPhone(e.target.value)} /></label>
+                <button className="primary" disabled={loading}>{loading ? 'Enviando…' : 'Receber nova senha por SMS/WhatsApp'}</button>
+              </form>}
+          <button type="button" className="link-button" onClick={() => { setMode('phone'); setError(''); setInfo('') }}>Voltar para o login</button>
+        </>}
       </section>
     </main>
   </div>
@@ -75,7 +132,7 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
         api.appointments(bounds.from, bounds.to), api.services(), api.professionals(), api.customers()
       ])
       setAppointments(agenda); setServices(serviceList); setProfessionals(professionalList); setCustomers(customerList)
-    } catch (err) { setError(err instanceof Error ? err.message : 'Erro inesperado') }
+    } catch (err) { setError(errorMessage(err)) }
     finally { setLoading(false) }
   }, [bounds])
 
@@ -83,7 +140,7 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   async function changeStatus(item: Appointment, status: Appointment['status']) {
     try { await api.updateStatus(item.id, status); await load() }
-    catch (err) { setError(err instanceof Error ? err.message : 'Erro inesperado') }
+    catch (err) { setError(errorMessage(err)) }
   }
 
   return <div className="app-shell">
@@ -126,24 +183,36 @@ function NewAppointment({ services, professionals, customers, onDone }: {
   services: Service[]; professionals: Professional[]; customers: Customer[]; onDone: () => Promise<void>
 }) {
   const [form, setForm] = useState({ customer_id: '', professional_id: '', service_id: '', starts_at: '', notes: '' })
-  const [name, setName] = useState(''); const [phone, setPhone] = useState('')
+  const [name, setName] = useState(''); const [phone, setPhone] = useState(''); const [grantAccess, setGrantAccess] = useState(false)
   const [list, setList] = useState(customers); const [saving, setSaving] = useState(false); const [error, setError] = useState('')
+  const [accessMessage, setAccessMessage] = useState('')
   async function addCustomer() {
     if (!name.trim()) return
     const customer = await api.createCustomer({ name, phone })
     setList(v => [...v, customer]); setForm(v => ({ ...v, customer_id: customer.id })); setName(''); setPhone('')
+    if (grantAccess && phone.trim()) {
+      try { setAccessMessage((await api.grantCustomerAccess(customer.id, phone)).message) }
+      catch (err) { setError(errorMessage(err)) }
+    }
+    setGrantAccess(false)
   }
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError('')
     try { await api.createAppointment({ ...form, starts_at: new Date(form.starts_at).toISOString() }); await onDone() }
-    catch (err) { setError(err instanceof Error ? err.message : 'Erro inesperado') }
+    catch (err) { setError(errorMessage(err)) }
     finally { setSaving(false) }
   }
   return <section className="form-page"><span className="eyebrow">NOVO HORÁRIO</span><h2>Agendar atendimento</h2>
     {error && <div className="alert">{error}</div>}
     <form onSubmit={submit}>
       <label>Cliente<select required value={form.customer_id} onChange={e => setForm({ ...form, customer_id: e.target.value })}><option value="">Selecione</option>{list.map(x => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
-      <details><summary>Cadastrar cliente rápido</summary><div className="quick"><input placeholder="Nome" value={name} onChange={e => setName(e.target.value)} /><input placeholder="Telefone" value={phone} onChange={e => setPhone(e.target.value)} /><button type="button" onClick={() => void addCustomer()}>Adicionar</button></div></details>
+      <details><summary>Cadastrar cliente rápido</summary><div className="quick">
+        <input placeholder="Nome" value={name} onChange={e => setName(e.target.value)} />
+        <input placeholder="Telefone" value={phone} onChange={e => setPhone(e.target.value)} />
+        <label className="checkbox"><input type="checkbox" checked={grantAccess} onChange={e => setGrantAccess(e.target.checked)} /> Enviar acesso ao app por SMS/WhatsApp (cliente sem e-mail)</label>
+        {accessMessage && <p>{accessMessage}</p>}
+        <button type="button" onClick={() => void addCustomer()}>Adicionar</button>
+      </div></details>
       <label>Serviço<select required value={form.service_id} onChange={e => setForm({ ...form, service_id: e.target.value })}><option value="">Selecione</option>{services.filter(x => x.active).map(x => <option value={x.id} key={x.id}>{x.name} · {money.format(x.price_cents / 100)}</option>)}</select></label>
       <label>Profissional<select required value={form.professional_id} onChange={e => setForm({ ...form, professional_id: e.target.value })}><option value="">Selecione</option>{professionals.filter(x => x.active).map(x => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
       <label>Data e hora<input type="datetime-local" required value={form.starts_at} onChange={e => setForm({ ...form, starts_at: e.target.value })} /></label>

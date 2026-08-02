@@ -13,6 +13,7 @@ import (
 	"github.com/example/barberflow/backend/internal/auth"
 	"github.com/example/barberflow/backend/internal/database"
 	apihttp "github.com/example/barberflow/backend/internal/http"
+	"github.com/example/barberflow/backend/internal/notify"
 	"github.com/example/barberflow/backend/internal/repository"
 )
 
@@ -47,7 +48,15 @@ func main() {
 		envDuration("JWT_ACCESS_TTL", 15*time.Minute),
 		envDuration("JWT_REFRESH_TTL", 7*24*time.Hour),
 	)
-	handler := apihttp.New(repository.New(pool), os.Getenv("CORS_ORIGINS"), tokenizer)
+	oauthRedirectBase := env("OAUTH_REDIRECT_BASE_URL", "http://localhost:8080")
+	handler := apihttp.New(repository.New(pool), apihttp.Config{
+		Origins:     os.Getenv("CORS_ORIGINS"),
+		Tokenizer:   tokenizer,
+		Google:      auth.NewGoogleProvider(os.Getenv("GOOGLE_CLIENT_ID"), os.Getenv("GOOGLE_CLIENT_SECRET"), oauthRedirectBase+"/api/v1/auth/google/callback"),
+		Facebook:    auth.NewFacebookProvider(os.Getenv("FACEBOOK_CLIENT_ID"), os.Getenv("FACEBOOK_CLIENT_SECRET"), oauthRedirectBase+"/api/v1/auth/facebook/callback"),
+		Notifier:    notify.New(os.Getenv("ZENVIA_API_TOKEN"), env("ZENVIA_FROM_SMS", "BarberFlow"), env("ZENVIA_FROM_WHATSAPP", "BarberFlow")),
+		FrontendURL: env("FRONTEND_URL", "http://localhost:5173"),
+	})
 	server := &http.Server{
 		Addr:              ":" + port,
 		Handler:           handler,

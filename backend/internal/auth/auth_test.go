@@ -72,3 +72,57 @@ func TestTokenizerRejectsExpiredToken(t *testing.T) {
 		t.Fatal("expected expired token to be rejected")
 	}
 }
+
+func TestSignAndVerifyState(t *testing.T) {
+	secret := []byte("state-secret")
+	state, err := SignState(secret)
+	if err != nil {
+		t.Fatalf("sign state: %v", err)
+	}
+	if err := VerifyState(secret, state, time.Minute); err != nil {
+		t.Fatalf("expected valid state to verify, got %v", err)
+	}
+}
+
+func TestVerifyStateRejectsTamperedOrWrongSecret(t *testing.T) {
+	secret := []byte("state-secret")
+	state, err := SignState(secret)
+	if err != nil {
+		t.Fatalf("sign state: %v", err)
+	}
+	if err := VerifyState([]byte("other-secret"), state, time.Minute); err == nil {
+		t.Fatal("expected state signed with a different secret to be rejected")
+	}
+	if err := VerifyState(secret, state+"tampered", time.Minute); err == nil {
+		t.Fatal("expected tampered state to be rejected")
+	}
+	if err := VerifyState(secret, "not.a.validstate", time.Minute); err == nil {
+		t.Fatal("expected malformed state to be rejected")
+	}
+}
+
+func TestVerifyStateRejectsExpired(t *testing.T) {
+	secret := []byte("state-secret")
+	state, err := SignState(secret)
+	if err != nil {
+		t.Fatalf("sign state: %v", err)
+	}
+	if err := VerifyState(secret, state, -time.Second); err == nil {
+		t.Fatal("expected expired state to be rejected")
+	}
+}
+
+func TestGenerateTempPasswordIsSixDigits(t *testing.T) {
+	password, err := GenerateTempPassword()
+	if err != nil {
+		t.Fatalf("generate temp password: %v", err)
+	}
+	if len(password) != 6 {
+		t.Fatalf("expected a 6-digit password, got %q", password)
+	}
+	for _, r := range password {
+		if r < '0' || r > '9' {
+			t.Fatalf("expected only digits, got %q", password)
+		}
+	}
+}
