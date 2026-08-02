@@ -1,4 +1,4 @@
-import type { Appointment, Customer, Professional, Service, Tenant, User } from './types'
+import type { Appointment, Customer, Professional, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
 
 const ACCESS_KEY = 'bf_access_token'
 const REFRESH_KEY = 'bf_refresh_token'
@@ -115,6 +115,14 @@ export const api = {
     request<Tenant>('/tenant', { method: 'PATCH', body: JSON.stringify(data) }),
   services: () => request<Service[]>('/services'),
   professionals: () => request<Professional[]>('/professionals'),
+  getSchedule: (professionalId: string) => request<ScheduleEntry[]>(`/professionals/${professionalId}/schedule`),
+  setSchedule: (professionalId: string, entries: ScheduleEntry[]) =>
+    request<ScheduleEntry[]>(`/professionals/${professionalId}/schedule`, { method: 'PUT', body: JSON.stringify({ entries }) }),
+  listTimeOff: (professionalId: string) => request<TimeOff[]>(`/professionals/${professionalId}/time-off`),
+  createTimeOff: (professionalId: string, data: { starts_at: string; ends_at: string; reason?: string }) =>
+    request<TimeOff>(`/professionals/${professionalId}/time-off`, { method: 'POST', body: JSON.stringify(data) }),
+  deleteTimeOff: (professionalId: string, id: string) =>
+    request<{ message: string }>(`/professionals/${professionalId}/time-off/${id}`, { method: 'DELETE' }),
   customers: () => request<Customer[]>('/customers'),
   createCustomer: (data: Omit<Customer, 'id'>) => request<Customer>('/customers', { method: 'POST', body: JSON.stringify(data) }),
   appointments: (from: string, to: string) => request<Appointment[]>(`/appointments?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),

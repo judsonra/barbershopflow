@@ -43,6 +43,11 @@ Há três formas de autenticar, dependendo de quem tem e-mail e quem não tem:
 | POST | `/services` | Cria serviço | `manager` |
 | GET | `/professionals` | Lista profissionais | qualquer papel |
 | POST | `/professionals` | Cria profissional | `manager` |
+| GET | `/professionals/{id}/schedule` | Jornada semanal do profissional | qualquer papel |
+| PUT | `/professionals/{id}/schedule` | Substitui a jornada semanal inteira | `manager` ou o próprio `professional` |
+| GET | `/professionals/{id}/time-off?from=&to=` | Lista bloqueios (ausência/folga/viagem) no período | qualquer papel |
+| POST | `/professionals/{id}/time-off` | Cria um bloqueio | `manager` ou o próprio `professional` |
+| DELETE | `/professionals/{id}/time-off/{blockId}` | Remove um bloqueio | `manager` ou o próprio `professional` |
 | GET | `/customers` | Lista clientes | `manager` ou `professional` |
 | POST | `/customers` | Cria cliente | `manager` ou `professional` |
 | POST | `/customers/{id}/credentials` | Concede/renova acesso por celular a um cliente | `manager` ou `professional` |
@@ -133,6 +138,35 @@ barbearia por vez. O isolamento que importa é o dos dados de negócio
   regra de sobreposição do item 4 de "Agendamentos" em
   [regras-de-negocio.md](regras-de-negocio.md)) — só quem confirma
   manualmente é que muda.
+
+## Jornada de trabalho e bloqueios
+
+`PUT /professionals/{id}/schedule` substitui a jornada semanal inteira
+(dias ausentes do array viram folga fixa, se houver ao menos um dia
+presente):
+
+```json
+{
+  "entries": [
+    { "weekday": 1, "start_minute": 540, "end_minute": 1080 },
+    { "weekday": 2, "start_minute": 540, "end_minute": 1080 }
+  ]
+}
+```
+
+`weekday` segue a convenção do Go (`time.Weekday`): 0=domingo..6=sábado.
+`start_minute`/`end_minute` são minutos desde a meia-noite (540 = 09:00,
+1080 = 18:00), no fuso em que os agendamentos desse profissional são
+criados. Sem nenhuma entrada, o profissional não tem restrição de horário.
+
+`POST /professionals/{id}/time-off` cria um bloqueio pontual:
+
+```json
+{ "starts_at": "2026-08-10T00:00:00-03:00", "ends_at": "2026-08-17T00:00:00-03:00", "reason": "Viagem" }
+```
+
+`POST /appointments` responde `409 outside_working_hours` se o horário cair
+fora da jornada do dia, e `409 time_blocked` se sobrepuser um bloqueio.
 
 Exemplo de agendamento:
 

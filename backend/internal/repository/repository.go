@@ -71,6 +71,111 @@ func (r *Repository) CreateProfessional(ctx context.Context, tenantID string, it
 	return item, err
 }
 
+func (r *Repository) professionalExists(ctx context.Context, tenantID, professionalID string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM professionals WHERE id=$1 AND tenant_id=$2)`, professionalID, tenantID).Scan(&exists)
+	return exists, err
+}
+
+func (r *Repository) GetProfessionalSchedule(ctx context.Context, tenantID, professionalID string) ([]domain.ScheduleEntry, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT weekday, start_minute, end_minute FROM professional_schedules
+		WHERE tenant_id=$1 AND professional_id=$2 ORDER BY weekday`, tenantID, professionalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.ScheduleEntry{}
+	for rows.Next() {
+		var item domain.ScheduleEntry
+		if err := rows.Scan(&item.Weekday, &item.StartMinute, &item.EndMinute); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// SetProfessionalSchedule replaces the professional's whole week in one go
+// - the caller (server.setProfessionalSchedule) always sends the full set,
+// so partial/incremental updates aren't needed.
+func (r *Repository) SetProfessionalSchedule(ctx context.Context, tenantID, professionalID string, entries []domain.ScheduleEntry) ([]domain.ScheduleEntry, error) {
+	exists, err := r.professionalExists(ctx, tenantID, professionalID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, domain.ErrNotFound
+	}
+
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `DELETE FROM professional_schedules WHERE tenant_id=$1 AND professional_id=$2`, tenantID, professionalID); err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if _, err := tx.Exec(ctx, `INSERT INTO professional_schedules(tenant_id, professional_id, weekday, start_minute, end_minute) VALUES($1,$2,$3,$4,$5)`,
+			tenantID, professionalID, entry.Weekday, entry.StartMinute, entry.EndMinute); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func (r *Repository) ListTimeOff(ctx context.Context, tenantID, professionalID string, from, to time.Time) ([]domain.TimeOff, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, professional_id, starts_at, ends_at, reason, created_at FROM professional_time_off
+		WHERE tenant_id=$1 AND professional_id=$2 AND ends_at > $3 AND starts_at < $4
+		ORDER BY starts_at`, tenantID, professionalID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.TimeOff{}
+	for rows.Next() {
+		var item domain.TimeOff
+		if err := rows.Scan(&item.ID, &item.ProfessionalID, &item.StartsAt, &item.EndsAt, &item.Reason, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *Repository) CreateTimeOff(ctx context.Context, tenantID, professionalID string, item domain.TimeOff) (domain.TimeOff, error) {
+	exists, err := r.professionalExists(ctx, tenantID, professionalID)
+	if err != nil {
+		return item, err
+	}
+	if !exists {
+		return item, domain.ErrNotFound
+	}
+	item.ProfessionalID = professionalID
+	err = r.db.QueryRow(ctx, `
+		INSERT INTO professional_time_off(tenant_id, professional_id, starts_at, ends_at, reason)
+		VALUES($1,$2,$3,$4,$5) RETURNING id, created_at`,
+		tenantID, professionalID, item.StartsAt, item.EndsAt, item.Reason).Scan(&item.ID, &item.CreatedAt)
+	return item, err
+}
+
+func (r *Repository) DeleteTimeOff(ctx context.Context, tenantID, professionalID, id string) error {
+	tag, err := r.db.Exec(ctx, `DELETE FROM professional_time_off WHERE id=$1 AND tenant_id=$2 AND professional_id=$3`, id, tenantID, professionalID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 func (r *Repository) ListCustomers(ctx context.Context, tenantID string) ([]domain.Customer, error) {
 	rows, err := r.db.Query(ctx, `SELECT id, name, phone, email, created_at FROM customers WHERE tenant_id=$1 ORDER BY name`, tenantID)
 	if err != nil {
@@ -188,6 +293,40 @@ func (r *Repository) CreateAppointment(ctx context.Context, tenantID, status str
 	}
 
 	item.EndsAt = item.StartsAt.Add(time.Duration(duration) * time.Minute)
+
+	var hasSchedule bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM professional_schedules WHERE professional_id=$1)`, item.ProfessionalID).Scan(&hasSchedule); err != nil {
+		return item, err
+	}
+	if hasSchedule {
+		weekday := int(item.StartsAt.Weekday())
+		startMinute := item.StartsAt.Hour()*60 + item.StartsAt.Minute()
+		endMinute := startMinute + duration
+		var windowStart, windowEnd int
+		err := tx.QueryRow(ctx, `SELECT start_minute, end_minute FROM professional_schedules WHERE professional_id=$1 AND weekday=$2`,
+			item.ProfessionalID, weekday).Scan(&windowStart, &windowEnd)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return item, domain.ErrOutsideWorkingHours
+		}
+		if err != nil {
+			return item, err
+		}
+		if startMinute < windowStart || endMinute > windowEnd {
+			return item, domain.ErrOutsideWorkingHours
+		}
+	}
+
+	var blocked bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM professional_time_off
+			WHERE professional_id=$1 AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2, $3, '[)'))`,
+		item.ProfessionalID, item.StartsAt, item.EndsAt).Scan(&blocked); err != nil {
+		return item, err
+	}
+	if blocked {
+		return item, domain.ErrTimeBlocked
+	}
+
 	err = tx.QueryRow(ctx, `INSERT INTO appointments(tenant_id,customer_id,professional_id,service_id,starts_at,ends_at,notes,price_cents,status)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,status,created_at`,
 		tenantID, item.CustomerID, item.ProfessionalID, item.ServiceID, item.StartsAt, item.EndsAt, item.Notes, item.PriceCents, status).

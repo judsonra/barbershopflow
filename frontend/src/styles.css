@@ -35,4 +35,12 @@ details { border: 1px dashed #c8bda9; border-radius: 11px; padding: 11px; }summa
 .link-button { display: block; margin: 14px auto 0; border: 0; background: none; color: #906521; font-size: 13px; text-decoration: underline; }
 .checkbox { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; font-weight: 400 !important; }
 .checkbox input { width: auto; }
+.schedule-grid { display: grid; gap: 10px; margin-top: 16px; }
+.schedule-row { background: white; border-radius: 11px; padding: 10px 12px; box-shadow: 0 4px 14px #1e293b0a; }
+.schedule-times { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.schedule-times input { width: auto; flex: 1; }
+.schedule-times span { color: #7b8290; font-size: 13px; }
+.time-off-list { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 8px; }
+.time-off-list li { background: white; border-radius: 11px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; box-shadow: 0 4px 14px #1e293b0a; font-size: 13px; }
+.time-off-list button { border: 1px solid #ddd5c8; border-radius: 8px; background: white; padding: 6px 10px; font-size: 12px; white-space: nowrap; }
 @media (min-width: 700px) { body { padding: 24px 0; }.app-shell { min-height: calc(100dvh - 48px); border-radius: 24px; overflow: hidden; } }

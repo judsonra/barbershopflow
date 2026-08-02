@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './api'
-import type { Appointment, Customer, Professional, Service, Tenant, User } from './types'
+import type { Appointment, Customer, Professional, Service, Tenant, TimeOff, User } from './types'
 
 function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : 'Erro inesperado'
@@ -146,7 +146,7 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
 
 function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   const isClient = user.role === 'client'
-  const [tab, setTab] = useState<'agenda' | 'new' | 'config'>('agenda')
+  const [tab, setTab] = useState<'agenda' | 'new' | 'config' | 'hours'>('agenda')
   const [offset, setOffset] = useState(0)
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [services, setServices] = useState<Service[]>([])
@@ -210,12 +210,15 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
       {tab === 'new' && <NewAppointment user={user} tenant={tenant} services={services} professionals={professionals} customers={customers}
         onDone={async () => { setTab('agenda'); setOffset(0); await load() }} />}
       {tab === 'config' && tenant && <TenantConfig tenant={tenant} onSaved={t => setTenant(t)} />}
+      {tab === 'hours' && <ScheduleManager user={user} professionals={professionals} />}
     </main>
 
     <nav>
       <button className={tab === 'agenda' ? 'active' : ''} onClick={() => setTab('agenda')}><span>▦</span>Agenda</button>
       {(!isClient || tenant?.self_scheduling_enabled) &&
         <button className={tab === 'new' ? 'active add' : 'add'} onClick={() => setTab('new')}><span>＋</span>Novo</button>}
+      {!isClient &&
+        <button className={tab === 'hours' ? 'active' : ''} onClick={() => setTab('hours')}><span>🕘</span>Horários</button>}
       {user.role === 'manager' &&
         <button className={tab === 'config' ? 'active' : ''} onClick={() => setTab('config')}><span>⚙</span>Config</button>}
     </nav>
@@ -245,6 +248,116 @@ function TenantConfig({ tenant, onSaved }: { tenant: Tenant; onSaved: (tenant: T
         : 'Só a equipe cria agendamentos.'}</p>
       <button className="primary" disabled={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
     </form>
+  </section>
+}
+
+const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
+
+function minutesToTime(minutes: number) {
+  return `${Math.floor(minutes / 60).toString().padStart(2, '0')}:${(minutes % 60).toString().padStart(2, '0')}`
+}
+function timeToMinutes(value: string) {
+  const [hours, minutes] = value.split(':').map(Number)
+  return hours * 60 + minutes
+}
+
+type ScheduleDay = { enabled: boolean; start: string; end: string }
+const DEFAULT_SCHEDULE_DAY: ScheduleDay = { enabled: false, start: '09:00', end: '18:00' }
+
+function ScheduleManager({ user, professionals }: { user: User; professionals: Professional[] }) {
+  const isManager = user.role === 'manager'
+  const [professionalId, setProfessionalId] = useState(isManager ? (professionals[0]?.id ?? '') : (user.professional_id ?? ''))
+  const [days, setDays] = useState<ScheduleDay[]>(Array.from({ length: 7 }, () => ({ ...DEFAULT_SCHEDULE_DAY })))
+  const [timeOff, setTimeOff] = useState<TimeOff[]>([])
+  const [block, setBlock] = useState({ starts_at: '', ends_at: '', reason: '' })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [info, setInfo] = useState('')
+
+  const load = useCallback(async () => {
+    if (!professionalId) { setLoading(false); return }
+    setLoading(true); setError(''); setInfo('')
+    try {
+      const [entries, blocks] = await Promise.all([api.getSchedule(professionalId), api.listTimeOff(professionalId)])
+      const next = Array.from({ length: 7 }, () => ({ ...DEFAULT_SCHEDULE_DAY }))
+      for (const entry of entries) next[entry.weekday] = { enabled: true, start: minutesToTime(entry.start_minute), end: minutesToTime(entry.end_minute) }
+      setDays(next); setTimeOff(blocks)
+    } catch (err) { setError(errorMessage(err)) }
+    finally { setLoading(false) }
+  }, [professionalId])
+
+  useEffect(() => { void load() }, [load])
+
+  function updateDay(weekday: number, patch: Partial<ScheduleDay>) {
+    setDays(v => v.map((day, i) => i === weekday ? { ...day, ...patch } : day))
+  }
+
+  async function saveSchedule() {
+    setSaving(true); setError(''); setInfo('')
+    try {
+      const entries = days
+        .map((day, weekday) => ({ weekday, start_minute: timeToMinutes(day.start), end_minute: timeToMinutes(day.end), enabled: day.enabled }))
+        .filter(entry => entry.enabled)
+        .map(({ weekday, start_minute, end_minute }) => ({ weekday, start_minute, end_minute }))
+      await api.setSchedule(professionalId, entries)
+      setInfo('Jornada salva.')
+    } catch (err) { setError(errorMessage(err)) }
+    finally { setSaving(false) }
+  }
+
+  async function addBlock(event: FormEvent) {
+    event.preventDefault(); setSaving(true); setError('')
+    try {
+      const created = await api.createTimeOff(professionalId, {
+        starts_at: new Date(block.starts_at).toISOString(), ends_at: new Date(block.ends_at).toISOString(), reason: block.reason
+      })
+      setTimeOff(v => [...v, created].sort((a, b) => a.starts_at.localeCompare(b.starts_at)))
+      setBlock({ starts_at: '', ends_at: '', reason: '' })
+    } catch (err) { setError(errorMessage(err)) }
+    finally { setSaving(false) }
+  }
+
+  async function removeBlock(id: string) {
+    try { await api.deleteTimeOff(professionalId, id); setTimeOff(v => v.filter(b => b.id !== id)) }
+    catch (err) { setError(errorMessage(err)) }
+  }
+
+  return <section className="form-page"><span className="eyebrow">HORÁRIOS</span><h2>Jornada de trabalho</h2>
+    {error && <div className="alert">{error}</div>}
+    {isManager && <label>Profissional<select value={professionalId} onChange={e => setProfessionalId(e.target.value)}>
+      {professionals.map(p => <option value={p.id} key={p.id}>{p.name}</option>)}
+    </select></label>}
+    {!professionalId ? <p>Nenhum profissional cadastrado.</p> : loading ? <p>Carregando…</p> : <>
+      <p>Dias sem horário marcado ficam de folga fixa. Sem nenhum dia marcado, a agenda fica livre o tempo todo.</p>
+      <div className="schedule-grid">
+        {WEEKDAYS.map((label, weekday) => <div className="schedule-row" key={weekday}>
+          <label className="checkbox"><input type="checkbox" checked={days[weekday].enabled}
+            onChange={e => updateDay(weekday, { enabled: e.target.checked })} /> {label}</label>
+          {days[weekday].enabled && <div className="schedule-times">
+            <input type="time" value={days[weekday].start} onChange={e => updateDay(weekday, { start: e.target.value })} />
+            <span>até</span>
+            <input type="time" value={days[weekday].end} onChange={e => updateDay(weekday, { end: e.target.value })} />
+          </div>}
+        </div>)}
+      </div>
+      {info && <p>{info}</p>}
+      <button className="primary" disabled={saving} onClick={() => void saveSchedule()}>{saving ? 'Salvando…' : 'Salvar jornada'}</button>
+
+      <h2>Ausências e bloqueios</h2>
+      {timeOff.length === 0 ? <p>Nenhum bloqueio cadastrado.</p> : <ul className="time-off-list">
+        {timeOff.map(b => <li key={b.id}>
+          <span>{new Date(b.starts_at).toLocaleString('pt-BR')} até {new Date(b.ends_at).toLocaleString('pt-BR')}{b.reason ? ` · ${b.reason}` : ''}</span>
+          <button type="button" onClick={() => void removeBlock(b.id)}>Remover</button>
+        </li>)}
+      </ul>}
+      <form onSubmit={addBlock} className="quick">
+        <label>Início<input type="datetime-local" required value={block.starts_at} onChange={e => setBlock({ ...block, starts_at: e.target.value })} /></label>
+        <label>Fim<input type="datetime-local" required value={block.ends_at} onChange={e => setBlock({ ...block, ends_at: e.target.value })} /></label>
+        <input placeholder="Motivo (folga, viagem, ausência...)" value={block.reason} onChange={e => setBlock({ ...block, reason: e.target.value })} />
+        <button disabled={saving}>Bloquear período</button>
+      </form>
+    </>}
   </section>
 }
 

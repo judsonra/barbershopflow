@@ -8,6 +8,8 @@ export type Tenant = {
 }
 export type Service = { id: string; name: string; duration_minutes: number; price_cents: number; active: boolean }
 export type Professional = { id: string; name: string; phone?: string; active: boolean }
+export type ScheduleEntry = { weekday: number; start_minute: number; end_minute: number }
+export type TimeOff = { id: string; professional_id: string; starts_at: string; ends_at: string; reason?: string }
 export type Customer = { id: string; name: string; phone?: string; email?: string }
 export type Appointment = {
   id: string; customer_id: string; customer_name: string; professional_id: string;

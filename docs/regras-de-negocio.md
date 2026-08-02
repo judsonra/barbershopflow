@@ -58,6 +58,25 @@ acesso a redes confiáveis.
 3. Neste MVP, qualquer profissional ativo pode executar qualquer serviço ativo.
    Uma tabela de especialidades é uma evolução prevista.
 
+### Jornada de trabalho e bloqueios
+
+1. Cada profissional pode definir, por dia da semana, um horário inicial e
+   final de atendimento (`GET`/`PUT /professionals/{id}/schedule`).
+2. Sem nenhum dia configurado, o profissional não tem restrição de horário
+   (retrocompatível com profissionais criados antes dessa regra existir).
+   Com ao menos um dia configurado, um dia da semana sem horário vira folga
+   fixa — nenhum agendamento é aceito nele.
+3. Além da jornada recorrente, o profissional pode bloquear períodos
+   pontuais (ausência, folga, viagem) com início e fim
+   (`GET`/`POST /professionals/{id}/time-off`, `DELETE .../time-off/{id}`).
+   Qualquer sobreposição com um bloqueio impede a criação do agendamento,
+   mesmo dentro da jornada normal.
+4. Um agendamento só é aceito se `[início, fim)` couber inteiramente dentro
+   da janela do dia da semana (quando configurada) e não sobrepuser nenhum
+   bloqueio. Vale tanto para staff quanto para autoagendamento do cliente.
+5. Só o próprio profissional ou o gestor podem editar a jornada e os
+   bloqueios de um profissional.
+
 ### Clientes
 
 1. Nome é obrigatório.

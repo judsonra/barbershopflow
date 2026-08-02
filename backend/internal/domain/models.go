@@ -6,13 +6,15 @@ import (
 )
 
 var (
-	ErrNotFound           = errors.New("resource not found")
-	ErrScheduleConflict   = errors.New("professional already has an appointment in this period")
-	ErrInvalidTransition  = errors.New("invalid appointment status transition")
-	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrForbidden          = errors.New("not allowed to perform this action")
-	ErrAccountLocked      = errors.New("account locked after too many failed login attempts")
-	ErrConflict           = errors.New("already in use")
+	ErrNotFound            = errors.New("resource not found")
+	ErrScheduleConflict    = errors.New("professional already has an appointment in this period")
+	ErrInvalidTransition   = errors.New("invalid appointment status transition")
+	ErrInvalidCredentials  = errors.New("invalid email or password")
+	ErrForbidden           = errors.New("not allowed to perform this action")
+	ErrAccountLocked       = errors.New("account locked after too many failed login attempts")
+	ErrConflict            = errors.New("already in use")
+	ErrOutsideWorkingHours = errors.New("requested time is outside the professional's working hours")
+	ErrTimeBlocked         = errors.New("requested time overlaps a blocked period")
 )
 
 type Tenant struct {
@@ -72,6 +74,31 @@ type Professional struct {
 	Phone     string    `json:"phone,omitempty"`
 	Active    bool      `json:"active"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// ScheduleEntry is one weekday's working window for a professional, in
+// minutes since midnight (local to whatever offset appointments for that
+// professional are booked in — see docs/regras-de-negocio.md). Weekday
+// follows Go's time.Weekday: 0=Sunday..6=Saturday. A professional with no
+// entries at all has no working-hours restriction (backward compatible with
+// professionals created before this feature); once at least one entry
+// exists, any weekday without one becomes a fixed day off.
+type ScheduleEntry struct {
+	Weekday     int `json:"weekday"`
+	StartMinute int `json:"start_minute"`
+	EndMinute   int `json:"end_minute"`
+}
+
+// TimeOff is an ad-hoc blocked period (absence, day off, travel) that
+// overrides the recurring schedule and blocks new appointments regardless
+// of it.
+type TimeOff struct {
+	ID             string    `json:"id"`
+	ProfessionalID string    `json:"professional_id"`
+	StartsAt       time.Time `json:"starts_at"`
+	EndsAt         time.Time `json:"ends_at"`
+	Reason         string    `json:"reason,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 type Customer struct {

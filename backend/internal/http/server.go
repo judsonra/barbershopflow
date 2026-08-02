@@ -45,6 +45,11 @@ type Store interface {
 	GetTenantBySlug(ctx context.Context, slug string) (domain.Tenant, error)
 	GetTenantByID(ctx context.Context, id string) (domain.Tenant, error)
 	UpdateTenantSettings(ctx context.Context, tenantID string, selfSchedulingEnabled, autoConfirmAppointments bool) (domain.Tenant, error)
+	GetProfessionalSchedule(ctx context.Context, tenantID, professionalID string) ([]domain.ScheduleEntry, error)
+	SetProfessionalSchedule(ctx context.Context, tenantID, professionalID string, entries []domain.ScheduleEntry) ([]domain.ScheduleEntry, error)
+	ListTimeOff(ctx context.Context, tenantID, professionalID string, from, to time.Time) ([]domain.TimeOff, error)
+	CreateTimeOff(ctx context.Context, tenantID, professionalID string, item domain.TimeOff) (domain.TimeOff, error)
+	DeleteTimeOff(ctx context.Context, tenantID, professionalID, id string) error
 	CreateTenantWithManager(ctx context.Context, tenantName, slug, managerName, email, passwordHash string) (domain.Tenant, domain.User, error)
 }
 
@@ -90,6 +95,11 @@ func New(store Store, cfg Config) http.Handler {
 	protected.HandleFunc("POST /api/v1/services", s.requireRole(domain.RoleManager, s.createService))
 	protected.HandleFunc("GET /api/v1/professionals", s.listProfessionals)
 	protected.HandleFunc("POST /api/v1/professionals", s.requireRole(domain.RoleManager, s.createProfessional))
+	protected.HandleFunc("GET /api/v1/professionals/{id}/schedule", s.getProfessionalSchedule)
+	protected.HandleFunc("PUT /api/v1/professionals/{id}/schedule", s.requireOwnerOrManager(s.setProfessionalSchedule))
+	protected.HandleFunc("GET /api/v1/professionals/{id}/time-off", s.listTimeOff)
+	protected.HandleFunc("POST /api/v1/professionals/{id}/time-off", s.requireOwnerOrManager(s.createTimeOff))
+	protected.HandleFunc("DELETE /api/v1/professionals/{id}/time-off/{blockId}", s.requireOwnerOrManager(s.deleteTimeOff))
 	protected.HandleFunc("GET /api/v1/customers", s.requireStaff(s.listCustomers))
 	protected.HandleFunc("POST /api/v1/customers", s.requireStaff(s.createCustomer))
 	protected.HandleFunc("POST /api/v1/customers/{id}/credentials", s.requireStaff(s.grantCustomerAccess))
@@ -556,6 +566,21 @@ func (s *server) requireStaff(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// requireOwnerOrManager allows a manager to manage any professional's
+// schedule/time-off, and a professional to manage only their own
+// ({id} path value must match claims.ProfessionalID).
+func (s *server) requireOwnerOrManager(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := claimsFromContext(r)
+		isOwner := claims.Role == domain.RoleProfessional && claims.ProfessionalID == r.PathValue("id")
+		if !ok || (claims.Role != domain.RoleManager && !isOwner) {
+			writeError(w, http.StatusForbidden, "forbidden", "sem permissão para esta ação")
+			return
+		}
+		next(w, r)
+	}
+}
+
 func claimsFromContext(r *http.Request) (*auth.Claims, bool) {
 	claims, ok := r.Context().Value(claimsContextKey).(*auth.Claims)
 	return claims, ok
@@ -599,6 +624,78 @@ func (s *server) createProfessional(w http.ResponseWriter, r *http.Request) {
 	created, err := s.store.CreateProfessional(r.Context(), claims.TenantID, item)
 	respondCreated(w, created, err)
 }
+
+func (s *server) getProfessionalSchedule(w http.ResponseWriter, r *http.Request) {
+	claims, _ := claimsFromContext(r)
+	items, err := s.store.GetProfessionalSchedule(r.Context(), claims.TenantID, r.PathValue("id"))
+	respond(w, items, err)
+}
+
+func (s *server) setProfessionalSchedule(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Entries []domain.ScheduleEntry `json:"entries"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	seen := map[int]bool{}
+	for _, entry := range body.Entries {
+		if entry.Weekday < 0 || entry.Weekday > 6 || entry.StartMinute < 0 || entry.EndMinute <= entry.StartMinute || entry.EndMinute > 1440 {
+			writeError(w, http.StatusBadRequest, "validation_error", "jornada inválida: dia da semana e horários devem ser válidos")
+			return
+		}
+		if seen[entry.Weekday] {
+			writeError(w, http.StatusBadRequest, "validation_error", "dia da semana repetido")
+			return
+		}
+		seen[entry.Weekday] = true
+	}
+	claims, _ := claimsFromContext(r)
+	items, err := s.store.SetProfessionalSchedule(r.Context(), claims.TenantID, r.PathValue("id"), body.Entries)
+	respond(w, items, err)
+}
+
+func (s *server) listTimeOff(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	from, err := parseTime(r.URL.Query().Get("from"), now.AddDate(0, 0, -1))
+	if err != nil {
+		writeError(w, 400, "validation_error", "from inválido")
+		return
+	}
+	to, err := parseTime(r.URL.Query().Get("to"), from.AddDate(0, 3, 0))
+	if err != nil || !to.After(from) {
+		writeError(w, 400, "validation_error", "to inválido")
+		return
+	}
+	claims, _ := claimsFromContext(r)
+	items, err := s.store.ListTimeOff(r.Context(), claims.TenantID, r.PathValue("id"), from, to)
+	respond(w, items, err)
+}
+
+func (s *server) createTimeOff(w http.ResponseWriter, r *http.Request) {
+	var item domain.TimeOff
+	if !decode(w, r, &item) {
+		return
+	}
+	if item.StartsAt.IsZero() || item.EndsAt.IsZero() || !item.EndsAt.After(item.StartsAt) {
+		writeError(w, http.StatusBadRequest, "validation_error", "início e fim válidos são obrigatórios")
+		return
+	}
+	claims, _ := claimsFromContext(r)
+	created, err := s.store.CreateTimeOff(r.Context(), claims.TenantID, r.PathValue("id"), item)
+	respondCreated(w, created, err)
+}
+
+func (s *server) deleteTimeOff(w http.ResponseWriter, r *http.Request) {
+	claims, _ := claimsFromContext(r)
+	err := s.store.DeleteTimeOff(r.Context(), claims.TenantID, r.PathValue("id"), r.PathValue("blockId"))
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Bloqueio removido."})
+}
+
 func (s *server) listCustomers(w http.ResponseWriter, r *http.Request) {
 	claims, _ := claimsFromContext(r)
 	items, err := s.store.ListCustomers(r.Context(), claims.TenantID)
@@ -743,6 +840,10 @@ func handleError(w http.ResponseWriter, err error) {
 		writeError(w, 403, "forbidden", err.Error())
 	case errors.Is(err, domain.ErrConflict):
 		writeError(w, 409, "conflict", "barbearia ou e-mail já cadastrados")
+	case errors.Is(err, domain.ErrOutsideWorkingHours):
+		writeError(w, 409, "outside_working_hours", "horário fora da jornada de trabalho do profissional")
+	case errors.Is(err, domain.ErrTimeBlocked):
+		writeError(w, 409, "time_blocked", "horário bloqueado (ausência, folga ou viagem)")
 	default:
 		log.Printf("request error: %v", err)
 		writeError(w, 500, "internal_error", "erro interno")
