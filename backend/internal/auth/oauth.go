@@ -122,42 +122,50 @@ func getJSON(ctx context.Context, client *http.Client, url string, dst any) erro
 }
 
 // State signing: a self-verifying CSRF token for the OAuth redirect flow,
-// so no server-side session storage is needed. Format: <nonce>.<unixTime>.<hmac>.
+// so no server-side session storage is needed. It also carries an optional
+// payload (the tenant slug a brand-new client is signing up into) through
+// the round trip to the provider and back.
+// Format: <nonce>.<unixTime>.<base64url(payload)>.<hmac>.
 var ErrInvalidState = errors.New("invalid or expired oauth state")
 
-func SignState(secret []byte) (string, error) {
+func SignState(secret []byte, payload string) (string, error) {
 	nonce := make([]byte, 16)
 	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
 	encodedNonce := base64.RawURLEncoding.EncodeToString(nonce)
+	encodedPayload := base64.RawURLEncoding.EncodeToString([]byte(payload))
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
-	sig := signStatePayload(secret, encodedNonce, ts)
-	return encodedNonce + "." + ts + "." + sig, nil
+	sig := signStatePayload(secret, encodedNonce, ts, encodedPayload)
+	return encodedNonce + "." + ts + "." + encodedPayload + "." + sig, nil
 }
 
-func VerifyState(secret []byte, state string, maxAge time.Duration) error {
+func VerifyState(secret []byte, state string, maxAge time.Duration) (string, error) {
 	parts := strings.Split(state, ".")
-	if len(parts) != 3 {
-		return ErrInvalidState
+	if len(parts) != 4 {
+		return "", ErrInvalidState
 	}
-	encodedNonce, ts, sig := parts[0], parts[1], parts[2]
-	expected := signStatePayload(secret, encodedNonce, ts)
+	encodedNonce, ts, encodedPayload, sig := parts[0], parts[1], parts[2], parts[3]
+	expected := signStatePayload(secret, encodedNonce, ts, encodedPayload)
 	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
-		return ErrInvalidState
+		return "", ErrInvalidState
 	}
 	seconds, err := strconv.ParseInt(ts, 10, 64)
 	if err != nil {
-		return ErrInvalidState
+		return "", ErrInvalidState
 	}
 	if time.Since(time.Unix(seconds, 0)) > maxAge {
-		return ErrInvalidState
+		return "", ErrInvalidState
 	}
-	return nil
+	payload, err := base64.RawURLEncoding.DecodeString(encodedPayload)
+	if err != nil {
+		return "", ErrInvalidState
+	}
+	return string(payload), nil
 }
 
-func signStatePayload(secret []byte, encodedNonce, ts string) string {
+func signStatePayload(secret []byte, encodedNonce, ts, encodedPayload string) string {
 	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(encodedNonce + "." + ts))
+	mac.Write([]byte(encodedNonce + "." + ts + "." + encodedPayload))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }

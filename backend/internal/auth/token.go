@@ -17,6 +17,7 @@ var ErrInvalidToken = errors.New("invalid or expired token")
 
 type Claims struct {
 	UserID         string `json:"uid"`
+	TenantID       string `json:"tenant_id"`
 	Role           string `json:"role"`
 	ProfessionalID string `json:"professional_id,omitempty"`
 	CustomerID     string `json:"customer_id,omitempty"`
@@ -49,6 +50,7 @@ func (t *Tokenizer) GenerateRefreshToken(user domain.User) (string, error) {
 func (t *Tokenizer) generate(user domain.User, tokenType string, ttl time.Duration) (string, error) {
 	claims := Claims{
 		UserID:         user.ID,
+		TenantID:       user.TenantID,
 		Role:           user.Role,
 		ProfessionalID: user.ProfessionalID,
 		CustomerID:     user.CustomerID,

@@ -12,7 +12,16 @@ var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrForbidden          = errors.New("not allowed to perform this action")
 	ErrAccountLocked      = errors.New("account locked after too many failed login attempts")
+	ErrConflict           = errors.New("already in use")
 )
+
+type Tenant struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Slug      string    `json:"slug"`
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"created_at"`
+}
 
 const (
 	RoleManager      = "manager"
@@ -28,6 +37,7 @@ const MaxLoginAttempts = 3
 
 type User struct {
 	ID                  string    `json:"id"`
+	TenantID            string    `json:"tenant_id"`
 	Name                string    `json:"name"`
 	Email               string    `json:"email,omitempty"`
 	Phone               string    `json:"phone,omitempty"`

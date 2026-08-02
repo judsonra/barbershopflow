@@ -5,7 +5,9 @@ Base: `/api/v1`. Corpos e respostas usam JSON.
 ## Autenticação
 
 Todas as rotas abaixo, exceto as marcadas como "pública", exigem um access
-token JWT no cabeçalho `Authorization: Bearer <token>`.
+token JWT no cabeçalho `Authorization: Bearer <token>`. Toda a API é
+multi-tenant: o token carrega `tenant_id` e cada gestor/profissional/cliente
+só enxerga dados da própria barbearia — ver "Multi-tenant" abaixo.
 
 Há três formas de autenticar, dependendo de quem tem e-mail e quem não tem:
 
@@ -30,6 +32,7 @@ Há três formas de autenticar, dependendo de quem tem e-mail e quem não tem:
 
 | Método | Rota | Descrição | Autenticação |
 |---|---|---|---|
+| POST | `/tenants` | Cria uma barbearia nova + gestor inicial; já retorna tokens (auto-login) | pública |
 | POST | `/auth/login` | Login com e-mail+senha ou celular+senha | pública |
 | POST | `/auth/refresh` | Troca um refresh token válido por um novo access token | pública |
 | POST | `/auth/recover` | Envia senha nova por SMS/WhatsApp a um celular cadastrado | pública |
@@ -74,6 +77,34 @@ migração `002_users.sql`) deve trocar a senha assim que possível — use o
 login social com o mesmo e-mail para trocar de método de acesso sem depender
 da senha atual; até lá, trate essa credencial como sensível e restrinja o
 acesso à API a redes confiáveis.
+
+## Multi-tenant
+
+Cada barbearia é um `tenant`, criado via `POST /tenants`:
+
+```json
+{
+  "tenant_name": "Barbearia do Zé",
+  "slug": "barbearia-do-ze",
+  "manager_name": "Zé",
+  "email": "ze@barbeariadoze.com",
+  "password": "senha-forte"
+}
+```
+
+Resposta igual à de login (`access_token`, `refresh_token`, `user`), já
+autenticado como gestor da barbearia recém-criada. `slug` só aceita letras
+minúsculas, números e hífen, e precisa ser único (`409 conflict`, assim como
+e-mail duplicado). Login social (Google/Facebook) de um cliente totalmente
+novo — sem conta existente com aquele e-mail — também precisa saber em qual
+barbearia se cadastrar: passe `?tenant=<slug>` em `/auth/google/start` ou
+`/auth/facebook/start`.
+
+Identificadores de login (e-mail, celular, ids do Google/Facebook) são
+globalmente únicos entre barbearias — uma pessoa pertence a uma única
+barbearia por vez. O isolamento que importa é o dos dados de negócio
+(serviços, profissionais, clientes, agendamentos), sempre filtrados pelo
+`tenant_id` do token.
 
 Exemplo de agendamento:
 

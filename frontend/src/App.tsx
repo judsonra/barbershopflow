@@ -34,7 +34,12 @@ export default function App() {
   return <AgendaApp user={user} onLogout={() => { api.logout(); setUser(null) }} />
 }
 
-type LoginMode = 'email' | 'phone' | 'recover'
+type LoginMode = 'email' | 'phone' | 'recover' | 'signup'
+
+function slugify(value: string) {
+  return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+}
 
 function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initialError?: string }) {
   const [mode, setMode] = useState<LoginMode>('email')
@@ -44,10 +49,23 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
   const [error, setError] = useState(initialError ?? '')
   const [info, setInfo] = useState('')
   const [loading, setLoading] = useState(false)
+  const [signup, setSignup] = useState({ tenantName: '', managerName: '', email: '', password: '' })
 
   async function submitEmail(event: FormEvent) {
     event.preventDefault(); setLoading(true); setError('')
     try { onLogin(await api.login(email, password)) }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setLoading(false) }
+  }
+
+  async function submitSignup(event: FormEvent) {
+    event.preventDefault(); setLoading(true); setError('')
+    try {
+      onLogin(await api.createTenant({
+        tenant_name: signup.tenantName, slug: slugify(signup.tenantName),
+        manager_name: signup.managerName, email: signup.email, password: signup.password
+      }))
+    }
     catch (err) { setError(errorMessage(err)) }
     finally { setLoading(false) }
   }
@@ -88,6 +106,18 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
             <a className="social-button" href={api.socialLoginUrl('facebook')}>Entrar com Facebook</a>
           </div>
           <button type="button" className="link-button" onClick={() => { setMode('phone'); setError('') }}>Sou cliente e entro com celular</button>
+          <button type="button" className="link-button" onClick={() => { setMode('signup'); setError('') }}>Cadastrar minha barbearia</button>
+        </>}
+
+        {mode === 'signup' && <>
+          <form onSubmit={submitSignup}>
+            <label>Nome da barbearia<input required value={signup.tenantName} onChange={e => setSignup({ ...signup, tenantName: e.target.value })} /></label>
+            <label>Seu nome<input required value={signup.managerName} onChange={e => setSignup({ ...signup, managerName: e.target.value })} /></label>
+            <label>E-mail<input type="email" required autoComplete="username" value={signup.email} onChange={e => setSignup({ ...signup, email: e.target.value })} /></label>
+            <label>Senha<input type="password" required minLength={8} autoComplete="new-password" value={signup.password} onChange={e => setSignup({ ...signup, password: e.target.value })} /></label>
+            <button className="primary" disabled={loading}>{loading ? 'Criando…' : 'Criar barbearia'}</button>
+          </form>
+          <button type="button" className="link-button" onClick={() => { setMode('email'); setError('') }}>Já tenho conta</button>
         </>}
 
         {mode === 'phone' && <>

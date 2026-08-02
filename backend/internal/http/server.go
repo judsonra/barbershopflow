@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,18 +18,18 @@ import (
 )
 
 type Store interface {
-	ListServices(context.Context) ([]domain.Service, error)
-	CreateService(context.Context, domain.Service) (domain.Service, error)
-	ListProfessionals(context.Context) ([]domain.Professional, error)
-	CreateProfessional(context.Context, domain.Professional) (domain.Professional, error)
-	ListCustomers(context.Context) ([]domain.Customer, error)
-	CreateCustomer(context.Context, domain.Customer) (domain.Customer, error)
-	GetCustomerByID(context.Context, string) (domain.Customer, error)
-	UpdateCustomerPhone(context.Context, string, string) error
-	ListAppointments(context.Context, time.Time, time.Time) ([]domain.Appointment, error)
-	CreateAppointment(context.Context, domain.Appointment) (domain.Appointment, error)
-	UpdateAppointmentStatus(context.Context, string, string) (domain.Appointment, error)
-	GetAppointmentProfessionalID(context.Context, string) (string, error)
+	ListServices(ctx context.Context, tenantID string) ([]domain.Service, error)
+	CreateService(ctx context.Context, tenantID string, item domain.Service) (domain.Service, error)
+	ListProfessionals(ctx context.Context, tenantID string) ([]domain.Professional, error)
+	CreateProfessional(ctx context.Context, tenantID string, item domain.Professional) (domain.Professional, error)
+	ListCustomers(ctx context.Context, tenantID string) ([]domain.Customer, error)
+	CreateCustomer(ctx context.Context, tenantID string, item domain.Customer) (domain.Customer, error)
+	GetCustomerByID(ctx context.Context, tenantID, id string) (domain.Customer, error)
+	UpdateCustomerPhone(ctx context.Context, tenantID, customerID, phone string) error
+	ListAppointments(ctx context.Context, tenantID string, from, to time.Time) ([]domain.Appointment, error)
+	CreateAppointment(ctx context.Context, tenantID string, item domain.Appointment) (domain.Appointment, error)
+	UpdateAppointmentStatus(ctx context.Context, tenantID, id, status string) (domain.Appointment, error)
+	GetAppointmentProfessionalID(ctx context.Context, tenantID, id string) (string, error)
 	GetUserByEmail(context.Context, string) (domain.User, error)
 	GetUserByPhone(context.Context, string) (domain.User, error)
 	GetUserByGoogleID(context.Context, string) (domain.User, error)
@@ -40,7 +41,9 @@ type Store interface {
 	SetPassword(context.Context, string, string) error
 	ResetLoginAttempts(context.Context, string) error
 	IncrementFailedLogin(context.Context, string) (bool, error)
-	UpsertClientCredentials(ctx context.Context, customerID, name, phone, passwordHash string) (domain.User, error)
+	UpsertClientCredentials(ctx context.Context, tenantID, customerID, name, phone, passwordHash string) (domain.User, error)
+	GetTenantBySlug(ctx context.Context, slug string) (domain.Tenant, error)
+	CreateTenantWithManager(ctx context.Context, tenantName, slug, managerName, email, passwordHash string) (domain.Tenant, domain.User, error)
 }
 
 type Config struct {
@@ -68,6 +71,7 @@ func New(store Store, cfg Config) http.Handler {
 	public.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	public.HandleFunc("POST /api/v1/tenants", s.createTenant)
 	public.HandleFunc("POST /api/v1/auth/login", s.login)
 	public.HandleFunc("POST /api/v1/auth/refresh", s.refresh)
 	public.HandleFunc("POST /api/v1/auth/recover", s.recoverPhone)
@@ -91,6 +95,52 @@ func New(store Store, cfg Config) http.Handler {
 
 	public.Handle("/", s.requireAuth(protected))
 	return recoverer(logger(cors(public, cfg.Origins)))
+}
+
+var slugPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+
+// createTenant is the self-service onboarding flow: a new barbershop signs
+// itself up, no invite or manual provisioning needed. Creates the tenant
+// and its first manager account atomically and logs the manager in right
+// away, same response shape as /auth/login.
+func (s *server) createTenant(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		TenantName  string `json:"tenant_name"`
+		Slug        string `json:"slug"`
+		ManagerName string `json:"manager_name"`
+		Email       string `json:"email"`
+		Password    string `json:"password"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	body.TenantName = strings.TrimSpace(body.TenantName)
+	body.Slug = strings.ToLower(strings.TrimSpace(body.Slug))
+	body.ManagerName = strings.TrimSpace(body.ManagerName)
+	body.Email = strings.TrimSpace(body.Email)
+	if body.TenantName == "" || body.ManagerName == "" || body.Email == "" {
+		writeError(w, http.StatusBadRequest, "validation_error", "nome da barbearia, nome do gestor e e-mail são obrigatórios")
+		return
+	}
+	if !slugPattern.MatchString(body.Slug) {
+		writeError(w, http.StatusBadRequest, "validation_error", "slug deve conter apenas letras minúsculas, números e hífen")
+		return
+	}
+	if len(body.Password) < 8 {
+		writeError(w, http.StatusBadRequest, "validation_error", "senha deve ter ao menos 8 caracteres")
+		return
+	}
+	hash, err := auth.HashPassword(body.Password)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	_, manager, err := s.store.CreateTenantWithManager(r.Context(), body.TenantName, body.Slug, body.ManagerName, body.Email, hash)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	s.issueTokens(w, manager)
 }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
@@ -219,8 +269,9 @@ func (s *server) grantCustomerAccess(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
+	claims, _ := claimsFromContext(r)
 	customerID := r.PathValue("id")
-	customer, err := s.store.GetCustomerByID(r.Context(), customerID)
+	customer, err := s.store.GetCustomerByID(r.Context(), claims.TenantID, customerID)
 	if err != nil {
 		handleError(w, err)
 		return
@@ -234,7 +285,7 @@ func (s *server) grantCustomerAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if phone != customer.Phone {
-		if err := s.store.UpdateCustomerPhone(r.Context(), customerID, phone); err != nil {
+		if err := s.store.UpdateCustomerPhone(r.Context(), claims.TenantID, customerID, phone); err != nil {
 			handleError(w, err)
 			return
 		}
@@ -254,7 +305,7 @@ func (s *server) grantCustomerAccess(w http.ResponseWriter, r *http.Request) {
 		handleError(w, err)
 		return
 	}
-	if _, err := s.store.UpsertClientCredentials(r.Context(), customerID, customer.Name, phone, hash); err != nil {
+	if _, err := s.store.UpsertClientCredentials(r.Context(), claims.TenantID, customerID, customer.Name, phone, hash); err != nil {
 		handleError(w, err)
 		return
 	}
@@ -315,14 +366,26 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 
 // oauthStart redirects to the provider's consent screen. The CSRF state is
 // a self-verifying signed token (see auth.SignState) so no server-side
-// session is needed between the start and callback requests.
+// session is needed between the start and callback requests. An optional
+// ?tenant=<slug> identifies which barbershop a brand-new client is signing
+// up into — carried through the state, since existing accounts (staff or
+// returning clients) already know their tenant from the matched user row.
 func (s *server) oauthStart(provider *auth.SocialProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !provider.Configured() {
 			writeError(w, http.StatusNotImplemented, "oauth_not_configured", "login social não configurado neste ambiente")
 			return
 		}
-		state, err := auth.SignState(s.cfg.Tokenizer.Secret())
+		tenantID := ""
+		if slug := r.URL.Query().Get("tenant"); slug != "" {
+			tenant, err := s.store.GetTenantBySlug(r.Context(), slug)
+			if err != nil {
+				handleError(w, err)
+				return
+			}
+			tenantID = tenant.ID
+		}
+		state, err := auth.SignState(s.cfg.Tokenizer.Secret(), tenantID)
 		if err != nil {
 			handleError(w, err)
 			return
@@ -341,7 +404,8 @@ func (s *server) oauthCallback(provider *auth.SocialProvider, providerName strin
 			writeError(w, http.StatusNotImplemented, "oauth_not_configured", "login social não configurado neste ambiente")
 			return
 		}
-		if err := auth.VerifyState(s.cfg.Tokenizer.Secret(), r.URL.Query().Get("state"), 10*time.Minute); err != nil {
+		tenantID, err := auth.VerifyState(s.cfg.Tokenizer.Secret(), r.URL.Query().Get("state"), 10*time.Minute)
+		if err != nil {
 			s.redirectWithError(w, r, "state inválido ou expirado")
 			return
 		}
@@ -351,7 +415,7 @@ func (s *server) oauthCallback(provider *auth.SocialProvider, providerName strin
 			s.redirectWithError(w, r, "não foi possível concluir o login")
 			return
 		}
-		user, err := s.findOrCreateSocialUser(r.Context(), providerName, info)
+		user, err := s.findOrCreateSocialUser(r.Context(), providerName, tenantID, info)
 		if err != nil {
 			log.Printf("oauth upsert user (%s): %v", providerName, err)
 			s.redirectWithError(w, r, "não foi possível concluir o login")
@@ -382,9 +446,11 @@ func (s *server) redirectWithError(w http.ResponseWriter, r *http.Request, messa
 // user matched by provider id, then by e-mail (this is how a manager or
 // professional recovers access without a "forgot password" flow: sign in
 // with the same e-mail via Google/Facebook). If no account matches at all,
-// a brand-new client (customer + login) is self-registered — never a
-// manager or professional, those are always provisioned by staff.
-func (s *server) findOrCreateSocialUser(ctx context.Context, providerName string, info auth.OAuthUserInfo) (domain.User, error) {
+// a brand-new client (customer + login) is self-registered into tenantID
+// (resolved from ?tenant=<slug> at oauthStart) — never a manager or
+// professional, those are always provisioned by staff. Self-registration
+// without a tenant is rejected: there's no barbershop to enroll into.
+func (s *server) findOrCreateSocialUser(ctx context.Context, providerName, tenantID string, info auth.OAuthUserInfo) (domain.User, error) {
 	lookup, link := s.store.GetUserByGoogleID, s.store.LinkGoogleID
 	if providerName == "facebook" {
 		lookup, link = s.store.GetUserByFacebookID, s.store.LinkFacebookID
@@ -406,11 +472,14 @@ func (s *server) findOrCreateSocialUser(ctx context.Context, providerName string
 		return domain.User{}, err
 	}
 
-	customer, err := s.store.CreateCustomer(ctx, domain.Customer{Name: info.Name, Email: info.Email})
+	if tenantID == "" {
+		return domain.User{}, fmt.Errorf("cadastro social exige a barbearia (?tenant=<slug>)")
+	}
+	customer, err := s.store.CreateCustomer(ctx, tenantID, domain.Customer{Name: info.Name, Email: info.Email})
 	if err != nil {
 		return domain.User{}, err
 	}
-	newUser := domain.User{Name: info.Name, Email: info.Email, Role: domain.RoleClient, CustomerID: customer.ID}
+	newUser := domain.User{TenantID: tenantID, Name: info.Name, Email: info.Email, Role: domain.RoleClient, CustomerID: customer.ID}
 	if providerName == "google" {
 		newUser.GoogleID = info.ProviderID
 	} else {
@@ -467,7 +536,8 @@ func claimsFromContext(r *http.Request) (*auth.Claims, bool) {
 }
 
 func (s *server) listServices(w http.ResponseWriter, r *http.Request) {
-	items, err := s.store.ListServices(r.Context())
+	claims, _ := claimsFromContext(r)
+	items, err := s.store.ListServices(r.Context(), claims.TenantID)
 	respond(w, items, err)
 }
 func (s *server) createService(w http.ResponseWriter, r *http.Request) {
@@ -480,11 +550,13 @@ func (s *server) createService(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation_error", "nome, duração de 5 a 480 minutos e preço não negativo são obrigatórios")
 		return
 	}
-	created, err := s.store.CreateService(r.Context(), item)
+	claims, _ := claimsFromContext(r)
+	created, err := s.store.CreateService(r.Context(), claims.TenantID, item)
 	respondCreated(w, created, err)
 }
 func (s *server) listProfessionals(w http.ResponseWriter, r *http.Request) {
-	items, err := s.store.ListProfessionals(r.Context())
+	claims, _ := claimsFromContext(r)
+	items, err := s.store.ListProfessionals(r.Context(), claims.TenantID)
 	respond(w, items, err)
 }
 func (s *server) createProfessional(w http.ResponseWriter, r *http.Request) {
@@ -497,11 +569,13 @@ func (s *server) createProfessional(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "validation_error", "nome é obrigatório")
 		return
 	}
-	created, err := s.store.CreateProfessional(r.Context(), item)
+	claims, _ := claimsFromContext(r)
+	created, err := s.store.CreateProfessional(r.Context(), claims.TenantID, item)
 	respondCreated(w, created, err)
 }
 func (s *server) listCustomers(w http.ResponseWriter, r *http.Request) {
-	items, err := s.store.ListCustomers(r.Context())
+	claims, _ := claimsFromContext(r)
+	items, err := s.store.ListCustomers(r.Context(), claims.TenantID)
 	respond(w, items, err)
 }
 func (s *server) createCustomer(w http.ResponseWriter, r *http.Request) {
@@ -514,7 +588,8 @@ func (s *server) createCustomer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "validation_error", "nome é obrigatório")
 		return
 	}
-	created, err := s.store.CreateCustomer(r.Context(), item)
+	claims, _ := claimsFromContext(r)
+	created, err := s.store.CreateCustomer(r.Context(), claims.TenantID, item)
 	respondCreated(w, created, err)
 }
 func (s *server) listAppointments(w http.ResponseWriter, r *http.Request) {
@@ -529,7 +604,8 @@ func (s *server) listAppointments(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "validation_error", "to inválido")
 		return
 	}
-	items, err := s.store.ListAppointments(r.Context(), from, to)
+	claims, _ := claimsFromContext(r)
+	items, err := s.store.ListAppointments(r.Context(), claims.TenantID, from, to)
 	respond(w, items, err)
 }
 func (s *server) createAppointment(w http.ResponseWriter, r *http.Request) {
@@ -541,7 +617,8 @@ func (s *server) createAppointment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "validation_error", "cliente, profissional, serviço e horário são obrigatórios")
 		return
 	}
-	created, err := s.store.CreateAppointment(r.Context(), item)
+	claims, _ := claimsFromContext(r)
+	created, err := s.store.CreateAppointment(r.Context(), claims.TenantID, item)
 	respondCreated(w, created, err)
 }
 func (s *server) updateStatus(w http.ResponseWriter, r *http.Request) {
@@ -554,7 +631,7 @@ func (s *server) updateStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	claims, _ := claimsFromContext(r)
 	if claims.Role == domain.RoleProfessional {
-		professionalID, err := s.store.GetAppointmentProfessionalID(r.Context(), id)
+		professionalID, err := s.store.GetAppointmentProfessionalID(r.Context(), claims.TenantID, id)
 		if err != nil {
 			handleError(w, err)
 			return
@@ -564,7 +641,7 @@ func (s *server) updateStatus(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	item, err := s.store.UpdateAppointmentStatus(r.Context(), id, body.Status)
+	item, err := s.store.UpdateAppointmentStatus(r.Context(), claims.TenantID, id, body.Status)
 	respond(w, item, err)
 }
 
@@ -608,6 +685,8 @@ func handleError(w http.ResponseWriter, err error) {
 		writeError(w, 422, "invalid_transition", err.Error())
 	case errors.Is(err, domain.ErrForbidden):
 		writeError(w, 403, "forbidden", err.Error())
+	case errors.Is(err, domain.ErrConflict):
+		writeError(w, 409, "conflict", "barbearia ou e-mail já cadastrados")
 	default:
 		log.Printf("request error: %v", err)
 		writeError(w, 500, "internal_error", "erro interno")

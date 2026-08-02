@@ -90,6 +90,13 @@ export const api = {
     storeTokens(data.access_token, data.refresh_token)
     return data.user
   },
+  createTenant: async (data: { tenant_name: string; slug: string; manager_name: string; email: string; password: string }) => {
+    const result = await request<{ access_token: string; refresh_token: string; user: User }>(
+      '/tenants', { method: 'POST', body: JSON.stringify(data) }
+    )
+    storeTokens(result.access_token, result.refresh_token)
+    return result.user
+  },
   loginByPhone: async (phone: string, password: string) => {
     const data = await request<{ access_token: string; refresh_token: string; user: User }>(
       '/auth/login', { method: 'POST', body: JSON.stringify({ phone, password }) }

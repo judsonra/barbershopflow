@@ -19,11 +19,13 @@ atual (backend Go, frontend React/PWA, infra Docker).
 
 ## 2. Multi-tenant / multiunidade
 
-- [ ] Adicionar `tenant_id` (barbearia) em `services`, `professionals`, `customers`, `appointments`
-- [ ] Isolar todas as queries de `repository.go` por tenant
-- [ ] Incluir `tenant_id` na exclusion constraint `appointments_no_overlap` (hoje é global por `professional_id`)
-- [ ] Definir fluxo de onboarding de nova barbearia (criação de tenant + usuário admin inicial)
-- [ ] Decidir estratégia de isolamento: coluna `tenant_id` compartilhada (recomendado, migração mais simples a partir do schema atual) vs. schema-per-tenant
+- [x] Adicionar `tenant_id` (barbearia) em `users`, `services`, `professionals`, `customers`, `appointments`
+- [x] Isolar todas as queries de `repository.go` por tenant (services/professionals/customers/appointments); login por e-mail/celular/social continua global de propósito — ver `docs/regras-de-negocio.md`
+- [x] Incluir `tenant_id` na exclusion constraint `appointments_no_overlap`
+- [x] Onboarding self-service: `POST /api/v1/tenants` cria barbearia + gestor inicial numa transação e já faz login (tela "Cadastrar minha barbearia" no frontend)
+- [x] Estratégia de isolamento: coluna `tenant_id` compartilhada (decidido, ver migração `005_multi_tenant.sql`)
+- [ ] Tela de gestão do próprio tenant (trocar nome/slug da barbearia, ver dados da conta)
+- [ ] Página de billing/planos, se o produto for monetizado por barbearia
 
 ## 3. Regras de negócio previstas (fora do MVP atual)
 
