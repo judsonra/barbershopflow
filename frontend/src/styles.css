@@ -1,0 +1,33 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@700&display=swap');
+:root { font-family: 'DM Sans', sans-serif; color: #18202a; background: #e8e5df; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+.app-shell { min-height: 100dvh; max-width: 540px; margin: auto; background: #f7f4ee; padding-bottom: 84px; position: relative; box-shadow: 0 0 40px #0001; }
+header { background: #111827; color: white; padding: max(24px, env(safe-area-inset-top)) 22px 24px; display: flex; justify-content: space-between; align-items: center; }
+h1, h2 { font-family: 'Playfair Display', serif; margin: 5px 0; }
+h1 { font-size: 30px; } h2 { font-size: 27px; }
+.eyebrow { color: #d6a85f; letter-spacing: .16em; font-size: 11px; font-weight: 700; }
+.avatar { width: 44px; height: 44px; border: 1px solid #d6a85f; color: #d6a85f; border-radius: 50%; display: grid; place-items: center; font-weight: 700; }
+main { padding: 20px 18px; }
+.date-nav { display: flex; justify-content: space-between; align-items: center; background: white; border-radius: 16px; padding: 10px; box-shadow: 0 6px 24px #1e293b0c; }
+.date-nav button { border: 0; background: #f2eee6; width: 42px; height: 42px; border-radius: 12px; font-size: 26px; }
+.date-nav div { text-align: center; display: grid; gap: 2px; }.date-nav small { color: #7b8290; }
+.appointments { display: grid; gap: 12px; margin-top: 18px; }
+.card { display: grid; grid-template-columns: 62px 1fr; background: white; border-radius: 15px; padding: 16px 14px; border-left: 4px solid #d6a85f; box-shadow: 0 5px 18px #1e293b0a; }
+.card.cancelled { opacity: .58; border-color: #9ca3af; }.card.completed { border-color: #3d8b6d; }
+.card time { font-size: 18px; font-weight: 700; color: #b07d31; }
+.card-body { border-left: 1px solid #eee9df; padding-left: 14px; }.card-body h3 { margin: 0; font-size: 17px; }
+.card-body p { color: #737987; margin: 6px 0; font-size: 14px; }.card-title { display: flex; gap: 8px; justify-content: space-between; }
+.card-title span { font-size: 10px; text-transform: uppercase; background: #f2eee6; padding: 4px 7px; border-radius: 20px; align-self: start; }
+.actions { display: flex; gap: 8px; margin-top: 12px; }.actions button { border: 1px solid #ddd5c8; border-radius: 8px; background: white; padding: 7px 10px; font-size: 12px; }
+.empty { text-align: center; padding: 70px 20px; color: #747b87; }.empty > span { font-size: 44px; }.empty h2 { color: #18202a; }.empty p { margin-bottom: 25px; }
+.primary { border: 0; border-radius: 12px; color: white; background: #b68034; padding: 14px 18px; font-weight: 700; width: 100%; }.primary:disabled { opacity: .6; }
+nav { position: fixed; z-index: 4; bottom: 0; width: min(100%, 540px); background: #111827; display: flex; justify-content: space-around; padding: 10px 20px max(10px, env(safe-area-inset-bottom)); }
+nav button { background: none; border: 0; color: #9ca3af; display: grid; gap: 2px; font-size: 11px; min-width: 85px; }nav button span { font-size: 24px; }nav button.active { color: #d6a85f; }
+.form-page form { display: grid; gap: 15px; margin-top: 22px; }.form-page label { display: grid; gap: 7px; font-size: 13px; font-weight: 600; }
+input, select, textarea { width: 100%; border: 1px solid #ddd7cc; background: white; border-radius: 11px; padding: 12px; color: #18202a; }
+details { border: 1px dashed #c8bda9; border-radius: 11px; padding: 11px; }summary { cursor: pointer; color: #906521; font-size: 13px; }.quick { display: grid; gap: 8px; margin-top: 10px; }.quick button { border: 0; border-radius: 8px; padding: 9px; background: #e9dfcf; }
+.alert { background: #fee2e2; color: #991b1b; border-radius: 11px; padding: 12px; margin-bottom: 14px; display: flex; justify-content: space-between; }.alert button { border: 0; background: none; }
+@media (min-width: 700px) { body { padding: 24px 0; }.app-shell { min-height: calc(100dvh - 48px); border-radius: 24px; overflow: hidden; } }
