@@ -1,3 +1,4 @@
+export type User = { id: string; name: string; email: string; role: 'manager' | 'professional'; professional_id?: string; active: boolean }
 export type Service = { id: string; name: string; duration_minutes: number; price_cents: number; active: boolean }
 export type Professional = { id: string; name: string; phone?: string; active: boolean }
 export type Customer = { id: string; name: string; phone?: string; email?: string }

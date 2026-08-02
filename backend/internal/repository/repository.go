@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -177,6 +178,41 @@ func (r *Repository) UpdateAppointmentStatus(ctx context.Context, id, status str
 		id, status).Scan(&item.ID, &item.CustomerID, &item.ProfessionalID, &item.ServiceID, &item.StartsAt,
 		&item.EndsAt, &item.Status, &item.Notes, &item.PriceCents, &item.CreatedAt)
 	return item, err
+}
+
+func (r *Repository) GetAppointmentProfessionalID(ctx context.Context, id string) (string, error) {
+	var professionalID string
+	err := r.db.QueryRow(ctx, `SELECT professional_id FROM appointments WHERE id=$1`, id).Scan(&professionalID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", domain.ErrNotFound
+	}
+	return professionalID, err
+}
+
+func (r *Repository) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
+	return r.scanUser(r.db.QueryRow(ctx, `
+		SELECT id, name, email, password_hash, role, professional_id, active, created_at
+		FROM users WHERE lower(email)=lower($1)`, email))
+}
+
+func (r *Repository) GetUserByID(ctx context.Context, id string) (domain.User, error) {
+	return r.scanUser(r.db.QueryRow(ctx, `
+		SELECT id, name, email, password_hash, role, professional_id, active, created_at
+		FROM users WHERE id=$1`, id))
+}
+
+func (r *Repository) scanUser(row pgx.Row) (domain.User, error) {
+	var item domain.User
+	var professionalID sql.NullString
+	err := row.Scan(&item.ID, &item.Name, &item.Email, &item.PasswordHash, &item.Role, &professionalID, &item.Active, &item.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return item, domain.ErrNotFound
+	}
+	if err != nil {
+		return item, err
+	}
+	item.ProfessionalID = professionalID.String
+	return item, nil
 }
 
 func isExclusionViolation(err error) bool {

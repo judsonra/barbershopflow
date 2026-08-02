@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/example/barberflow/backend/internal/auth"
 	"github.com/example/barberflow/backend/internal/database"
 	apihttp "github.com/example/barberflow/backend/internal/http"
 	"github.com/example/barberflow/backend/internal/repository"
@@ -41,7 +42,12 @@ func main() {
 		log.Fatalf("migrations: %v", err)
 	}
 
-	handler := apihttp.New(repository.New(pool), os.Getenv("CORS_ORIGINS"))
+	tokenizer := auth.NewTokenizer(
+		env("JWT_SECRET", "dev-secret-change-me"),
+		envDuration("JWT_ACCESS_TTL", 15*time.Minute),
+		envDuration("JWT_REFRESH_TTL", 7*24*time.Hour),
+	)
+	handler := apihttp.New(repository.New(pool), os.Getenv("CORS_ORIGINS"), tokenizer)
 	server := &http.Server{
 		Addr:              ":" + port,
 		Handler:           handler,
@@ -69,6 +75,15 @@ func main() {
 func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return fallback
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil {
+			return parsed
+		}
 	}
 	return fallback
 }

@@ -4,7 +4,7 @@ services:
       - "5432:5432"
 
   api:
-    image: golang:1.23-alpine
+    image: golang:1.25-alpine
     working_dir: /app
     command: go run ./cmd/api
     volumes:

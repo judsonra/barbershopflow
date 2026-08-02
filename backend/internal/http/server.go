@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/example/barberflow/backend/internal/auth"
 	"github.com/example/barberflow/backend/internal/domain"
 )
 
@@ -22,26 +23,149 @@ type Store interface {
 	ListAppointments(context.Context, time.Time, time.Time) ([]domain.Appointment, error)
 	CreateAppointment(context.Context, domain.Appointment) (domain.Appointment, error)
 	UpdateAppointmentStatus(context.Context, string, string) (domain.Appointment, error)
+	GetAppointmentProfessionalID(context.Context, string) (string, error)
+	GetUserByEmail(context.Context, string) (domain.User, error)
+	GetUserByID(context.Context, string) (domain.User, error)
 }
 
-type server struct{ store Store }
+type server struct {
+	store     Store
+	tokenizer *auth.Tokenizer
+}
 
-func New(store Store, origins string) http.Handler {
-	s := &server{store: store}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
+type ctxKey string
+
+const claimsContextKey ctxKey = "claims"
+
+func New(store Store, origins string, tokenizer *auth.Tokenizer) http.Handler {
+	s := &server{store: store, tokenizer: tokenizer}
+
+	public := http.NewServeMux()
+	public.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	mux.HandleFunc("GET /api/v1/services", s.listServices)
-	mux.HandleFunc("POST /api/v1/services", s.createService)
-	mux.HandleFunc("GET /api/v1/professionals", s.listProfessionals)
-	mux.HandleFunc("POST /api/v1/professionals", s.createProfessional)
-	mux.HandleFunc("GET /api/v1/customers", s.listCustomers)
-	mux.HandleFunc("POST /api/v1/customers", s.createCustomer)
-	mux.HandleFunc("GET /api/v1/appointments", s.listAppointments)
-	mux.HandleFunc("POST /api/v1/appointments", s.createAppointment)
-	mux.HandleFunc("PATCH /api/v1/appointments/{id}/status", s.updateStatus)
-	return recoverer(logger(cors(mux, origins)))
+	public.HandleFunc("POST /api/v1/auth/login", s.login)
+	public.HandleFunc("POST /api/v1/auth/refresh", s.refresh)
+
+	protected := http.NewServeMux()
+	protected.HandleFunc("GET /api/v1/auth/me", s.me)
+	protected.HandleFunc("GET /api/v1/services", s.listServices)
+	protected.HandleFunc("POST /api/v1/services", s.requireRole(domain.RoleManager, s.createService))
+	protected.HandleFunc("GET /api/v1/professionals", s.listProfessionals)
+	protected.HandleFunc("POST /api/v1/professionals", s.requireRole(domain.RoleManager, s.createProfessional))
+	protected.HandleFunc("GET /api/v1/customers", s.listCustomers)
+	protected.HandleFunc("POST /api/v1/customers", s.createCustomer)
+	protected.HandleFunc("GET /api/v1/appointments", s.listAppointments)
+	protected.HandleFunc("POST /api/v1/appointments", s.createAppointment)
+	protected.HandleFunc("PATCH /api/v1/appointments/{id}/status", s.updateStatus)
+
+	public.Handle("/", s.requireAuth(protected))
+	return recoverer(logger(cors(public, origins)))
+}
+
+func (s *server) login(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	user, err := s.store.GetUserByEmail(r.Context(), strings.TrimSpace(body.Email))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusUnauthorized, "invalid_credentials", "e-mail ou senha inválidos")
+		return
+	}
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	if !user.Active || !auth.CheckPassword(user.PasswordHash, body.Password) {
+		writeError(w, http.StatusUnauthorized, "invalid_credentials", "e-mail ou senha inválidos")
+		return
+	}
+	s.issueTokens(w, user)
+}
+
+func (s *server) refresh(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	claims, err := s.tokenizer.Parse(body.RefreshToken)
+	if err != nil || claims.TokenType != auth.TokenTypeRefresh {
+		writeError(w, http.StatusUnauthorized, "invalid_token", "refresh token inválido ou expirado")
+		return
+	}
+	user, err := s.store.GetUserByID(r.Context(), claims.UserID)
+	if err != nil || !user.Active {
+		writeError(w, http.StatusUnauthorized, "invalid_token", "refresh token inválido ou expirado")
+		return
+	}
+	s.issueTokens(w, user)
+}
+
+func (s *server) issueTokens(w http.ResponseWriter, user domain.User) {
+	access, err := s.tokenizer.GenerateAccessToken(user)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	refresh, err := s.tokenizer.GenerateRefreshToken(user)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"access_token":  access,
+		"refresh_token": refresh,
+		"user":          user,
+	})
+}
+
+func (s *server) me(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFromContext(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "autenticação necessária")
+		return
+	}
+	user, err := s.store.GetUserByID(r.Context(), claims.UserID)
+	respond(w, user, err)
+}
+
+func (s *server) requireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		header := r.Header.Get("Authorization")
+		token, found := strings.CutPrefix(header, "Bearer ")
+		if !found || token == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "autenticação necessária")
+			return
+		}
+		claims, err := s.tokenizer.Parse(token)
+		if err != nil || claims.TokenType != auth.TokenTypeAccess {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "token inválido ou expirado")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), claimsContextKey, claims)))
+	})
+}
+
+func (s *server) requireRole(role string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := claimsFromContext(r)
+		if !ok || claims.Role != role {
+			writeError(w, http.StatusForbidden, "forbidden", "sem permissão para esta ação")
+			return
+		}
+		next(w, r)
+	}
+}
+
+func claimsFromContext(r *http.Request) (*auth.Claims, bool) {
+	claims, ok := r.Context().Value(claimsContextKey).(*auth.Claims)
+	return claims, ok
 }
 
 func (s *server) listServices(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +253,20 @@ func (s *server) updateStatus(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	item, err := s.store.UpdateAppointmentStatus(r.Context(), r.PathValue("id"), body.Status)
+	id := r.PathValue("id")
+	claims, _ := claimsFromContext(r)
+	if claims.Role == domain.RoleProfessional {
+		professionalID, err := s.store.GetAppointmentProfessionalID(r.Context(), id)
+		if err != nil {
+			handleError(w, err)
+			return
+		}
+		if professionalID != claims.ProfessionalID {
+			writeError(w, http.StatusForbidden, "forbidden", "sem permissão para alterar este agendamento")
+			return
+		}
+	}
+	item, err := s.store.UpdateAppointmentStatus(r.Context(), id, body.Status)
 	respond(w, item, err)
 }
 
@@ -171,6 +308,8 @@ func handleError(w http.ResponseWriter, err error) {
 		writeError(w, 409, "schedule_conflict", err.Error())
 	case errors.Is(err, domain.ErrInvalidTransition):
 		writeError(w, 422, "invalid_transition", err.Error())
+	case errors.Is(err, domain.ErrForbidden):
+		writeError(w, 403, "forbidden", err.Error())
 	default:
 		log.Printf("request error: %v", err)
 		writeError(w, 500, "internal_error", "erro interno")

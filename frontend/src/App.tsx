@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from './api'
-import type { Appointment, Customer, Professional, Service } from './types'
+import type { Appointment, Customer, Professional, Service, User } from './types'
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 const dateTime = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -13,6 +13,51 @@ function dayBounds(offset = 0) {
 }
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(null)
+  const [checkingSession, setCheckingSession] = useState(true)
+
+  useEffect(() => {
+    api.onSessionExpired(() => setUser(null))
+    if (!api.isAuthenticated()) { setCheckingSession(false); return }
+    api.me().then(setUser).catch(() => api.logout()).finally(() => setCheckingSession(false))
+  }, [])
+
+  if (checkingSession) return <div className="empty">Carregando…</div>
+  if (!user) return <Login onLogin={setUser} />
+  return <AgendaApp user={user} onLogout={() => { api.logout(); setUser(null) }} />
+}
+
+function Login({ onLogin }: { onLogin: (user: User) => void }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setLoading(true); setError('')
+    try { onLogin(await api.login(email, password)) }
+    catch (err) { setError(err instanceof Error ? err.message : 'Erro inesperado') }
+    finally { setLoading(false) }
+  }
+
+  return <div className="app-shell">
+    <header>
+      <div><span className="eyebrow">BARBERFLOW</span><h1>Entrar</h1></div>
+    </header>
+    <main>
+      <section className="form-page">
+        {error && <div className="alert" role="alert">{error}</div>}
+        <form onSubmit={submit}>
+          <label>E-mail<input type="email" required autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} /></label>
+          <label>Senha<input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label>
+          <button className="primary" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
+        </form>
+      </section>
+    </main>
+  </div>
+}
+
+function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [tab, setTab] = useState<'agenda' | 'new'>('agenda')
   const [offset, setOffset] = useState(0)
   const [appointments, setAppointments] = useState<Appointment[]>([])
@@ -44,7 +89,7 @@ export default function App() {
   return <div className="app-shell">
     <header>
       <div><span className="eyebrow">BARBERFLOW</span><h1>Sua agenda</h1></div>
-      <div className="avatar">BF</div>
+      <button className="avatar" title={`${user.name} · Sair`} onClick={onLogout}>{user.name.slice(0, 2).toUpperCase()}</button>
     </header>
 
     <main>

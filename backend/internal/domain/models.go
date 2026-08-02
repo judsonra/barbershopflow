@@ -6,10 +6,28 @@ import (
 )
 
 var (
-	ErrNotFound          = errors.New("resource not found")
-	ErrScheduleConflict  = errors.New("professional already has an appointment in this period")
-	ErrInvalidTransition = errors.New("invalid appointment status transition")
+	ErrNotFound           = errors.New("resource not found")
+	ErrScheduleConflict   = errors.New("professional already has an appointment in this period")
+	ErrInvalidTransition  = errors.New("invalid appointment status transition")
+	ErrInvalidCredentials = errors.New("invalid email or password")
+	ErrForbidden          = errors.New("not allowed to perform this action")
 )
+
+const (
+	RoleManager      = "manager"
+	RoleProfessional = "professional"
+)
+
+type User struct {
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Email          string    `json:"email"`
+	PasswordHash   string    `json:"-"`
+	Role           string    `json:"role"`
+	ProfessionalID string    `json:"professional_id,omitempty"`
+	Active         bool      `json:"active"`
+	CreatedAt      time.Time `json:"created_at"`
+}
 
 type Service struct {
 	ID              string    `json:"id"`

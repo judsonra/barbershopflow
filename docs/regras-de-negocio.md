@@ -5,11 +5,20 @@
 ### Perfis
 
 - **Cliente:** pessoa atendida, identificada por nome, telefone e e-mail opcionais.
-- **Profissional:** barbeiro disponível para receber agendamentos.
+  Ainda não autentica na API (autoagendamento público é evolução futura, ver
+  abaixo).
+- **Profissional:** barbeiro disponível para receber agendamentos. Autentica
+  com papel `professional`; só pode alterar o status de agendamentos onde é o
+  profissional responsável.
 - **Gestor/recepção:** opera catálogo, profissionais, clientes e agenda.
+  Autentica com papel `manager`; único papel autorizado a cadastrar serviços e
+  profissionais.
 
-Autenticação e autorização por perfil são a próxima camada do produto. No MVP,
-a API é administrativa e deve ficar em rede confiável.
+Login é feito por e-mail e senha (`POST /api/v1/auth/login`), com access token
+de curta duração e refresh token, ver [docs/api.md](api.md). Recuperação de
+senha e revogação de refresh tokens ainda não existem — ver `TODO.md`. Até que
+esses fluxos existam, trate a API como administrativa e restrinja seu acesso a
+redes confiáveis.
 
 ### Serviços
 

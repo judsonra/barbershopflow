@@ -6,9 +6,9 @@ atual (backend Go, frontend React/PWA, infra Docker).
 
 ## 1. Autenticação & Autorização (bloqueador para produção)
 
-- [ ] Login (usuário/senha) para gestor/recepção e profissional
-- [ ] Autorização por papel: cliente, profissional, gestor/recepção
-- [ ] Sessão/JWT com expiração e refresh
+- [x] Login (usuário/senha) para gestor/recepção e profissional
+- [x] Autorização por papel: gestor/recepção e profissional (cliente ainda não autentica — depende do autoagendamento público)
+- [x] Sessão/JWT com expiração e refresh
 - [ ] Recuperação de senha (fluxo de e-mail)
 - [ ] Rate limiting em endpoints de autenticação
 - [ ] Até o login existir, manter a API restrita a rede confiável (risco atual documentado em `docs/regras-de-negocio.md`)
