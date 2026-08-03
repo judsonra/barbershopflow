@@ -50,6 +50,7 @@ atual (backend Go, frontend React/PWA, infra Docker).
 
 ## 5. Evolução mobile / PWA → produto instalável completo
 
+- [x] Salvar agendamento na agenda do smartphone: link "Google Agenda" e download de `.ics` (Apple Calendar/Outlook/demais apps) em cada agendamento agendado/confirmado
 - [ ] Push notifications (lembrete de agendamento)
 - [ ] Background sync para ações offline (hoje `/api` é `NetworkOnly`, sem fila offline)
 - [ ] Avaliar wrapper nativo (Capacitor) se for necessário publicar nas lojas (Play Store/App Store)

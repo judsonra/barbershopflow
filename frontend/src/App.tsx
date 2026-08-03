@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './api'
+import { downloadICS, googleCalendarUrl } from './calendar'
 import type { Appointment, Customer, Professional, Service, Tenant, TimeOff, User } from './types'
 
 function errorMessage(err: unknown) {
@@ -202,6 +203,10 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
               <div className="card-title"><h3>{item.customer_name}</h3><span>{statusLabel[item.status]}</span></div>
               <p>{item.service_name} · {item.professional_name}</p>
               <b>{money.format(item.price_cents / 100)}</b>
+              {(item.status === 'scheduled' || item.status === 'confirmed') && <div className="actions">
+                <a href={googleCalendarUrl(item)} target="_blank" rel="noreferrer">Google Agenda</a>
+                <button type="button" onClick={() => downloadICS(item)}>Baixar .ics</button>
+              </div>}
               {!isClient && item.status === 'scheduled' && <div className="actions"><button onClick={() => changeStatus(item, 'confirmed')}>Confirmar</button><button onClick={() => changeStatus(item, 'cancelled')}>Cancelar</button></div>}
               {!isClient && item.status === 'confirmed' && <div className="actions"><button onClick={() => changeStatus(item, 'completed')}>Concluir</button><button onClick={() => changeStatus(item, 'cancelled')}>Cancelar</button></div>}
             </div>
