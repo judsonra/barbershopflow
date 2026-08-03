@@ -245,7 +245,6 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
         {loading ? <div className="empty">Carregando agenda…</div> :
           appointments.length === 0 ? <div className="empty"><span>✂</span><h2>Agenda livre</h2>
             <p>{isClient ? 'Você ainda não tem horário marcado.' : 'Que tal criar o primeiro horário do dia?'}</p>
-            {(!isClient || tenant?.self_scheduling_enabled) && <button className="primary" onClick={() => setTab('new')}>Novo agendamento</button>}
           </div> :
           <section className="appointments">{appointments.map(item => <article className={`card ${item.status}`} key={item.id}>
             <time>{new Date(item.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', hour12: false })}</time>
