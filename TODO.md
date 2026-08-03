@@ -50,6 +50,8 @@ atual (backend Go, frontend React/PWA, infra Docker).
 - [ ] Ampliar cobertura de testes (hoje cobre pouco além do caminho feliz)
 - [ ] Estruturar migrações versionadas conforme o schema crescer (tenant, auth, etc.)
 - [ ] Paginação em `ListServices`/`ListProfessionals`/`ListCustomers` (hoje retornam tudo sem limite)
+- [x] Padronizar campos de hora em 24h: toda hora renderizada pelo app (card da agenda, cabeçalho do dia, lista de bloqueios) usa `hour12: false` explícito, garantido independente do navegador. Os seletores nativos (`type="time"`/`type="datetime-local"`) ganharam `lang="pt-BR"` como dica de melhor esforço, mas o formato exibido por eles (24h vs AM/PM) segue o idioma do navegador/SO do usuário, não a página — confirmado testando com locale forçado em inglês. Decisão registrada: manter o seletor nativo (melhor UX mobile) em vez de trocar por campo de texto com máscara, já que o público-alvo (BR) normalmente já usa o aparelho em pt-BR
+- [x] Cadastro de cliente ganhou campo de e-mail no formulário de cadastro rápido (backend já suportava desde o MVP)
 
 ## 5. Evolução mobile / PWA → produto instalável completo
 

@@ -8,7 +8,7 @@ function errorMessage(err: unknown) {
 }
 
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
-const dateTime = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+const dateTime = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })
 const statusLabel = { scheduled: 'Agendado', confirmed: 'Confirmado', completed: 'Concluído', cancelled: 'Cancelado' }
 
 function dayBounds(offset = 0) {
@@ -240,7 +240,7 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
             {(!isClient || tenant?.self_scheduling_enabled) && <button className="primary" onClick={() => setTab('new')}>Novo agendamento</button>}
           </div> :
           <section className="appointments">{appointments.map(item => <article className={`card ${item.status}`} key={item.id}>
-            <time>{new Date(item.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</time>
+            <time>{new Date(item.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', hour12: false })}</time>
             <div className="card-body">
               <div className="card-title"><h3>{item.customer_name}</h3><span>{statusLabel[item.status]}</span></div>
               <p>{item.service_name} · {item.professional_name}</p>
@@ -382,9 +382,9 @@ function ScheduleManager({ user, professionals }: { user: User; professionals: P
           <label className="checkbox"><input type="checkbox" checked={days[weekday].enabled}
             onChange={e => updateDay(weekday, { enabled: e.target.checked })} /> {label}</label>
           {days[weekday].enabled && <div className="schedule-times">
-            <input type="time" value={days[weekday].start} onChange={e => updateDay(weekday, { start: e.target.value })} />
+            <input type="time" lang="pt-BR" value={days[weekday].start} onChange={e => updateDay(weekday, { start: e.target.value })} />
             <span>até</span>
-            <input type="time" value={days[weekday].end} onChange={e => updateDay(weekday, { end: e.target.value })} />
+            <input type="time" lang="pt-BR" value={days[weekday].end} onChange={e => updateDay(weekday, { end: e.target.value })} />
           </div>}
         </div>)}
       </div>
@@ -394,13 +394,13 @@ function ScheduleManager({ user, professionals }: { user: User; professionals: P
       <h2>Ausências e bloqueios</h2>
       {timeOff.length === 0 ? <p>Nenhum bloqueio cadastrado.</p> : <ul className="time-off-list">
         {timeOff.map(b => <li key={b.id}>
-          <span>{new Date(b.starts_at).toLocaleString('pt-BR')} até {new Date(b.ends_at).toLocaleString('pt-BR')}{b.reason ? ` · ${b.reason}` : ''}</span>
+          <span>{new Date(b.starts_at).toLocaleString('pt-BR', { hour12: false })} até {new Date(b.ends_at).toLocaleString('pt-BR', { hour12: false })}{b.reason ? ` · ${b.reason}` : ''}</span>
           <button type="button" onClick={() => void removeBlock(b.id)}>Remover</button>
         </li>)}
       </ul>}
       <form onSubmit={addBlock} className="quick">
-        <label>Início<input type="datetime-local" required value={block.starts_at} onChange={e => setBlock({ ...block, starts_at: e.target.value })} /></label>
-        <label>Fim<input type="datetime-local" required value={block.ends_at} onChange={e => setBlock({ ...block, ends_at: e.target.value })} /></label>
+        <label>Início<input type="datetime-local" lang="pt-BR" required value={block.starts_at} onChange={e => setBlock({ ...block, starts_at: e.target.value })} /></label>
+        <label>Fim<input type="datetime-local" lang="pt-BR" required value={block.ends_at} onChange={e => setBlock({ ...block, ends_at: e.target.value })} /></label>
         <input placeholder="Motivo (folga, viagem, ausência...)" value={block.reason} onChange={e => setBlock({ ...block, reason: e.target.value })} />
         <button disabled={saving}>Bloquear período</button>
       </form>
@@ -413,13 +413,13 @@ function NewAppointment({ user, tenant, services, professionals, customers, onDo
 }) {
   const isClient = user.role === 'client'
   const [form, setForm] = useState({ customer_id: '', professional_id: '', service_id: '', starts_at: '', notes: '' })
-  const [name, setName] = useState(''); const [phone, setPhone] = useState(''); const [grantAccess, setGrantAccess] = useState(false)
+  const [name, setName] = useState(''); const [phone, setPhone] = useState(''); const [email, setEmail] = useState(''); const [grantAccess, setGrantAccess] = useState(false)
   const [list, setList] = useState(customers); const [saving, setSaving] = useState(false); const [error, setError] = useState('')
   const [accessMessage, setAccessMessage] = useState('')
   async function addCustomer() {
     if (!name.trim()) return
-    const customer = await api.createCustomer({ name, phone })
-    setList(v => [...v, customer]); setForm(v => ({ ...v, customer_id: customer.id })); setName(''); setPhone('')
+    const customer = await api.createCustomer({ name, phone, email })
+    setList(v => [...v, customer]); setForm(v => ({ ...v, customer_id: customer.id })); setName(''); setPhone(''); setEmail('')
     if (grantAccess && phone.trim()) {
       try { setAccessMessage((await api.grantCustomerAccess(customer.id, phone)).message) }
       catch (err) { setError(errorMessage(err)) }
@@ -442,6 +442,7 @@ function NewAppointment({ user, tenant, services, professionals, customers, onDo
         <details><summary>Cadastrar cliente rápido</summary><div className="quick">
           <input placeholder="Nome" value={name} onChange={e => setName(e.target.value)} />
           <input placeholder="Telefone" value={phone} onChange={e => setPhone(e.target.value)} />
+          <input type="email" placeholder="E-mail (opcional)" value={email} onChange={e => setEmail(e.target.value)} />
           <label className="checkbox"><input type="checkbox" checked={grantAccess} onChange={e => setGrantAccess(e.target.checked)} /> Enviar acesso ao app por SMS/WhatsApp (cliente sem e-mail)</label>
           {accessMessage && <p>{accessMessage}</p>}
           <button type="button" onClick={() => void addCustomer()}>Adicionar</button>
@@ -449,7 +450,7 @@ function NewAppointment({ user, tenant, services, professionals, customers, onDo
       </>}
       <label>Serviço<select required value={form.service_id} onChange={e => setForm({ ...form, service_id: e.target.value })}><option value="">Selecione</option>{services.filter(x => x.active).map(x => <option value={x.id} key={x.id}>{x.name} · {money.format(x.price_cents / 100)}</option>)}</select></label>
       <label>Profissional<select required value={form.professional_id} onChange={e => setForm({ ...form, professional_id: e.target.value })}><option value="">Selecione</option>{professionals.filter(x => x.active).map(x => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
-      <label>Data e hora<input type="datetime-local" required value={form.starts_at} onChange={e => setForm({ ...form, starts_at: e.target.value })} /></label>
+      <label>Data e hora<input type="datetime-local" lang="pt-BR" required value={form.starts_at} onChange={e => setForm({ ...form, starts_at: e.target.value })} /></label>
       <label>Observações<textarea rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
       <button className="primary" disabled={saving}>{saving ? 'Salvando…' : isClient ? 'Sugerir horário' : 'Confirmar agendamento'}</button>
     </form>
