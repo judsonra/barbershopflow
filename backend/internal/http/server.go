@@ -26,7 +26,7 @@ type Store interface {
 	CreateCustomer(ctx context.Context, tenantID string, item domain.Customer) (domain.Customer, error)
 	GetCustomerByID(ctx context.Context, tenantID, id string) (domain.Customer, error)
 	UpdateCustomerPhone(ctx context.Context, tenantID, customerID, phone string) error
-	ListAppointments(ctx context.Context, tenantID, customerID string, from, to time.Time) ([]domain.Appointment, error)
+	ListAppointments(ctx context.Context, tenantID, customerID, professionalID string, from, to time.Time) ([]domain.Appointment, error)
 	CreateAppointment(ctx context.Context, tenantID, status string, item domain.Appointment) (domain.Appointment, error)
 	UpdateAppointmentStatus(ctx context.Context, tenantID, id, status string) (domain.Appointment, error)
 	GetAppointmentProfessionalID(ctx context.Context, tenantID, id string) (string, error)
@@ -42,6 +42,9 @@ type Store interface {
 	ResetLoginAttempts(context.Context, string) error
 	IncrementFailedLogin(context.Context, string) (bool, error)
 	UpsertClientCredentials(ctx context.Context, tenantID, customerID, name, phone, passwordHash string) (domain.User, error)
+	GetProfessionalByID(ctx context.Context, tenantID, id string) (domain.Professional, error)
+	UpdateProfessionalPhone(ctx context.Context, tenantID, professionalID, phone string) error
+	UpsertProfessionalCredentials(ctx context.Context, tenantID, professionalID, name, phone, passwordHash string) (domain.User, error)
 	GetTenantBySlug(ctx context.Context, slug string) (domain.Tenant, error)
 	TenantNameAvailable(ctx context.Context, name string) (bool, error)
 	ListTenants(ctx context.Context) ([]domain.Tenant, error)
@@ -106,6 +109,7 @@ func New(store Store, cfg Config) http.Handler {
 	protected.HandleFunc("GET /api/v1/professionals/{id}/time-off", s.listTimeOff)
 	protected.HandleFunc("POST /api/v1/professionals/{id}/time-off", s.requireOwnerOrManager(s.createTimeOff))
 	protected.HandleFunc("DELETE /api/v1/professionals/{id}/time-off/{blockId}", s.requireOwnerOrManager(s.deleteTimeOff))
+	protected.HandleFunc("POST /api/v1/professionals/{id}/credentials", s.requireRole(domain.RoleManager, s.grantProfessionalAccess))
 	protected.HandleFunc("GET /api/v1/customers", s.requireStaff(s.listCustomers))
 	protected.HandleFunc("POST /api/v1/customers", s.requireStaff(s.createCustomer))
 	protected.HandleFunc("POST /api/v1/customers/{id}/credentials", s.requireStaff(s.grantCustomerAccess))
@@ -258,7 +262,8 @@ func writeLockedError(w http.ResponseWriter) {
 		"conta bloqueada apos muitas tentativas incorretas; use a recuperacao por SMS/WhatsApp")
 }
 
-// recoverPhone issues a brand-new temporary password to a client's phone,
+// recoverPhone issues a brand-new temporary password to a client's or
+// professional's phone (the two roles that log in by phone+password),
 // clearing any lockout. The response never reveals whether the phone is
 // registered, to avoid leaking which numbers have an account.
 func (s *server) recoverPhone(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +285,7 @@ func (s *server) recoverPhone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, err := s.store.GetUserByPhone(r.Context(), phone)
-	if err == nil && user.Role == domain.RoleClient {
+	if err == nil && (user.Role == domain.RoleClient || user.Role == domain.RoleProfessional) {
 		if password, hashErr := auth.GenerateTempPassword(); hashErr == nil {
 			if hash, hashErr := auth.HashPassword(password); hashErr == nil {
 				if setErr := s.store.SetPassword(r.Context(), user.ID, hash); setErr == nil {
@@ -345,6 +350,68 @@ func (s *server) grantCustomerAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.store.UpsertClientCredentials(r.Context(), claims.TenantID, customerID, customer.Name, phone, hash); err != nil {
+		handleError(w, err)
+		return
+	}
+	if err := s.cfg.Notifier.SendPassword(r.Context(), phone, password, channel); err != nil {
+		handleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Senha enviada com sucesso."})
+}
+
+// grantProfessionalAccess mirrors grantCustomerAccess exactly, just for a
+// professional's own login instead of a client's — same temp-password-by-
+// SMS/WhatsApp mechanism, reusing UpsertProfessionalCredentials's
+// ON CONFLICT (professional_id) to both create it the first time and
+// regenerate a forgotten/locked password later. Manager-only: unlike
+// registering a customer, handing out a coworker's login is a step up in
+// sensitivity, so professionals can't grant this to themselves or others.
+func (s *server) grantProfessionalAccess(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Phone   string `json:"phone"`
+		Channel string `json:"channel"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	claims, _ := claimsFromContext(r)
+	professionalID := r.PathValue("id")
+	professional, err := s.store.GetProfessionalByID(r.Context(), claims.TenantID, professionalID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	phone := strings.TrimSpace(body.Phone)
+	if phone == "" {
+		phone = professional.Phone
+	}
+	if phone == "" {
+		writeError(w, http.StatusBadRequest, "validation_error", "celular é obrigatório")
+		return
+	}
+	if phone != professional.Phone {
+		if err := s.store.UpdateProfessionalPhone(r.Context(), claims.TenantID, professionalID, phone); err != nil {
+			handleError(w, err)
+			return
+		}
+	}
+	channel := notify.ChannelWhatsApp
+	if body.Channel == notify.ChannelSMS {
+		channel = notify.ChannelSMS
+	}
+
+	password, err := auth.GenerateTempPassword()
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	if _, err := s.store.UpsertProfessionalCredentials(r.Context(), claims.TenantID, professionalID, professional.Name, phone, hash); err != nil {
 		handleError(w, err)
 		return
 	}
@@ -786,10 +853,14 @@ func (s *server) listAppointments(w http.ResponseWriter, r *http.Request) {
 	}
 	claims, _ := claimsFromContext(r)
 	customerFilter := ""
-	if claims.Role == domain.RoleClient {
+	professionalFilter := ""
+	switch claims.Role {
+	case domain.RoleClient:
 		customerFilter = claims.CustomerID
+	case domain.RoleProfessional:
+		professionalFilter = claims.ProfessionalID
 	}
-	items, err := s.store.ListAppointments(r.Context(), claims.TenantID, customerFilter, from, to)
+	items, err := s.store.ListAppointments(r.Context(), claims.TenantID, customerFilter, professionalFilter, from, to)
 	respond(w, items, err)
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
+import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
 
 describe('maskPhone', () => {
   it('formats progressively as digits are typed', () => {
@@ -29,6 +29,20 @@ describe('toE164BR', () => {
   it('returns an empty string when there are no digits', () => {
     expect(toE164BR('')).toBe('')
     expect(toE164BR('()')).toBe('')
+  })
+})
+
+describe('fromE164BR', () => {
+  it('strips the +55 country code and re-masks', () => {
+    expect(fromE164BR('+5511988887766')).toBe('(11) 98888-7766')
+  })
+
+  it('leaves an 11-digit number starting with DDD 55 alone', () => {
+    expect(fromE164BR('55988887766')).toBe('(55) 98888-7766')
+  })
+
+  it('round-trips through toE164BR', () => {
+    expect(fromE164BR(toE164BR('(21) 97777-6655'))).toBe('(21) 97777-6655')
   })
 })
 

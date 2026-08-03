@@ -21,6 +21,17 @@ export function toE164BR(value: string): string {
   return digits ? `+55${digits}` : ''
 }
 
+// Reverses toE164BR for editing an already-stored phone: strips the +55
+// country code before re-masking. Only strips it when the digit count
+// implies a country code is actually present (12-13 digits) — a bare
+// 10-11 digit number that happens to start with "55" is DDD 55 (Santa
+// Maria/RS), not a country code, so it's left alone.
+export function fromE164BR(value: string): string {
+  const digits = value.replace(/\D/g, '')
+  const national = digits.length > 11 && digits.startsWith('55') ? digits.slice(2) : digits
+  return maskPhone(national)
+}
+
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export function isValidEmail(value: string): boolean {

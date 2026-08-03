@@ -13,9 +13,14 @@
   Pode sugerir o próprio horário se a barbearia habilitar o autoagendamento —
   ver seção própria abaixo.
 - **Profissional:** barbeiro disponível para receber agendamentos. Autentica
-  com papel `professional`; só pode alterar o status de agendamentos onde é o
-  profissional responsável; também pode cadastrar clientes e conceder acesso
-  por celular.
+  com papel `professional`, por login social (Google/Facebook) se tiver
+  e-mail cadastrado, ou por celular + senha temporária se não tiver — o
+  gestor concede esse acesso pela primeira vez (ou renova) em
+  `POST /api/v1/professionals/{id}/credentials`, senha enviada por
+  SMS/WhatsApp, mesmo mecanismo usado para cliente. Só enxerga a própria
+  agenda (`GET /api/v1/appointments` filtra por `professional_id`), só pode
+  alterar o status de agendamentos onde é o profissional responsável; também
+  pode cadastrar clientes e conceder acesso por celular a eles.
 - **Gestor/recepção:** opera catálogo, profissionais, clientes e agenda.
   Autentica com papel `manager`; único papel autorizado a cadastrar serviços e
   profissionais.
@@ -26,11 +31,11 @@
   demais endpoints, que continuam scoped a um único tenant como sempre. Ver
   [docs/api.md](api.md).
 
-Staff (gestor/profissional) loga por e-mail e senha (`POST /api/v1/auth/login`)
-ou por login social com o mesmo e-mail da conta — que funciona como
-recuperação de acesso, sem precisar de "esqueci minha senha". Cliente sem
-e-mail loga por celular e senha, com rate limiting (3 tentativas erradas
-bloqueiam a conta) e recuperação via nova senha por SMS/WhatsApp
+Gestor loga por e-mail e senha (`POST /api/v1/auth/login`) ou por login social
+com o mesmo e-mail da conta — que funciona como recuperação de acesso, sem
+precisar de "esqueci minha senha". Cliente e profissional sem e-mail logam
+por celular e senha, com rate limiting (3 tentativas erradas bloqueiam a
+conta) e recuperação via nova senha por SMS/WhatsApp
 (`POST /api/v1/auth/recover`). Detalhes em [docs/api.md](api.md). Revogação de
 refresh tokens ainda não existe — ver `TODO.md`. Até lá, trate a API
 administrativa (rotas de gestor/profissional) como sensível e restrinja seu

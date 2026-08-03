@@ -22,13 +22,16 @@ Há três formas de autenticar, dependendo de quem tem e-mail e quem não tem:
    Se não existir, autocadastra um cliente novo. Responde `501
    oauth_not_configured` se as credenciais do provedor não estiverem nas
    variáveis de ambiente.
-3. **Celular + senha (cliente sem e-mail)** — `POST /auth/login` com
-   `{"phone","password"}`. Rate limited: 3 tentativas erradas bloqueiam a
-   conta (`423 account_locked`); o desbloqueio só acontece pedindo uma senha
-   nova em `POST /auth/recover` (`{"phone","channel"}`), enviada por
-   SMS/WhatsApp. O barbeiro concede esse acesso pela primeira vez em
-   `POST /customers/{id}/credentials` (mesmo corpo), que gera e envia a
-   senha inicial.
+3. **Celular + senha (cliente ou profissional sem e-mail)** — `POST
+   /auth/login` com `{"phone","password"}`. Rate limited: 3 tentativas
+   erradas bloqueiam a conta (`423 account_locked`); o desbloqueio só
+   acontece pedindo uma senha nova em `POST /auth/recover`
+   (`{"phone","channel"}`), enviada por SMS/WhatsApp — vale tanto para
+   cliente quanto para profissional. O gestor concede esse acesso pela
+   primeira vez (ou renova) em `POST /customers/{id}/credentials` ou
+   `POST /professionals/{id}/credentials` (mesmo corpo), que gera e envia a
+   senha inicial. Profissional autenticado por celular só enxerga a própria
+   agenda (ver `GET /appointments` abaixo).
 
 | Método | Rota | Descrição | Autenticação |
 |---|---|---|---|
@@ -49,6 +52,7 @@ Há três formas de autenticar, dependendo de quem tem e-mail e quem não tem:
 | GET | `/professionals/{id}/time-off?from=&to=` | Lista bloqueios (ausência/folga/viagem) no período | qualquer papel |
 | POST | `/professionals/{id}/time-off` | Cria um bloqueio | `manager` ou o próprio `professional` |
 | DELETE | `/professionals/{id}/time-off/{blockId}` | Remove um bloqueio | `manager` ou o próprio `professional` |
+| POST | `/professionals/{id}/credentials` | Concede/renova acesso por celular a um profissional | `manager` |
 | GET | `/customers` | Lista clientes | `manager` ou `professional` |
 | POST | `/customers` | Cria cliente | `manager` ou `professional` |
 | POST | `/customers/{id}/credentials` | Concede/renova acesso por celular a um cliente | `manager` ou `professional` |
@@ -56,7 +60,7 @@ Há três formas de autenticar, dependendo de quem tem e-mail e quem não tem:
 | PATCH | `/tenant` | Liga/desliga autoagendamento e auto-confirmação | `manager` |
 | GET | `/admin/tenants` | Lista todas as barbearias da plataforma | `superadmin` |
 | POST | `/admin/tenants/{id}/impersonate` | Vira o gestor daquela barbearia (novo access/refresh token) | `superadmin` |
-| GET | `/appointments?from=&to=` | Lista agenda no período (`client` só vê os próprios) | qualquer papel |
+| GET | `/appointments?from=&to=` | Lista agenda no período (`client` só vê os próprios; `professional` só vê os da própria agenda) | qualquer papel |
 | POST | `/appointments` | Cria agendamento; `client` só se autoagendamento estiver ligado, ver "Autoagendamento" | qualquer papel |
 | PATCH | `/appointments/{id}/status` | Altera estado | `manager`/`professional` (profissional só no próprio agendamento); `client` não pode |
 

@@ -117,6 +117,8 @@ export const api = {
     request<{ message: string }>('/auth/recover', { method: 'POST', body: JSON.stringify({ phone, channel }) }),
   grantCustomerAccess: (customerId: string, phone: string, channel: 'sms' | 'whatsapp' = 'whatsapp') =>
     request<{ message: string }>(`/customers/${customerId}/credentials`, { method: 'POST', body: JSON.stringify({ phone, channel }) }),
+  grantProfessionalAccess: (professionalId: string, phone: string, channel: 'sms' | 'whatsapp' = 'whatsapp') =>
+    request<{ message: string }>(`/professionals/${professionalId}/credentials`, { method: 'POST', body: JSON.stringify({ phone, channel }) }),
   logout: () => clearTokens(),
   me: () => request<User>('/auth/me'),
   tenant: () => request<Tenant>('/tenant'),

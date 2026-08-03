@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './api'
 import { downloadICS, googleCalendarUrl } from './calendar'
-import { isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
+import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
 import type { Appointment, Customer, Professional, Service, Tenant, TimeOff, User } from './types'
 
 function errorMessage(err: unknown) {
@@ -393,6 +393,10 @@ function ProfessionalsManager({ professionals, onCreated }: { professionals: Pro
   const [name, setName] = useState(''); const [phone, setPhone] = useState('')
   const [email, setEmail] = useState(''); const [cpf, setCpf] = useState('')
   const [saving, setSaving] = useState(false); const [error, setError] = useState('')
+  const [grantingId, setGrantingId] = useState<string | null>(null)
+  const [grantPhone, setGrantPhone] = useState('')
+  const [grantMessage, setGrantMessage] = useState('')
+  const [granting, setGranting] = useState(false)
 
   async function submit(event: FormEvent) {
     event.preventDefault(); setError('')
@@ -407,11 +411,36 @@ function ProfessionalsManager({ professionals, onCreated }: { professionals: Pro
     finally { setSaving(false) }
   }
 
+  function startGrant(professional: Professional) {
+    setGrantingId(professional.id)
+    setGrantPhone(professional.phone ? fromE164BR(professional.phone) : '')
+    setGrantMessage(''); setError('')
+  }
+
+  async function submitGrant(event: FormEvent) {
+    event.preventDefault(); setError(''); setGrantMessage(''); setGranting(true)
+    try { setGrantMessage((await api.grantProfessionalAccess(grantingId!, toE164BR(grantPhone))).message) }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setGranting(false) }
+  }
+
+  const grantingProfessional = professionals.find(p => p.id === grantingId)
+
   return <section className="form-page"><h2>Profissionais</h2>
     {error && <div className="alert">{error}</div>}
     {professionals.length === 0 ? <p>Nenhum profissional cadastrado.</p> : <ul className="tenant-list">
-      {professionals.map(p => <li key={p.id}><div><b>{p.name}</b>{!p.active && <small> · inativo</small>}{(p.email || p.phone) && <small> · {[p.email, p.phone].filter(Boolean).join(' · ')}</small>}</div></li>)}
+      {professionals.map(p => <li key={p.id}>
+        <div><b>{p.name}</b>{!p.active && <small> · inativo</small>}{(p.email || p.phone) && <small> · {[p.email, p.phone].filter(Boolean).join(' · ')}</small>}</div>
+        <button type="button" onClick={() => startGrant(p)}>Conceder acesso</button>
+      </li>)}
     </ul>}
+    {grantingProfessional && <form onSubmit={submitGrant} className="quick">
+      <p>Enviar senha de acesso ao app para <b>{grantingProfessional.name}</b> por SMS/WhatsApp:</p>
+      {grantMessage && <p>{grantMessage}</p>}
+      <input type="tel" placeholder="(11) 99999-0000" required value={grantPhone} onChange={e => setGrantPhone(maskPhone(e.target.value))} maxLength={16} />
+      <button disabled={granting}>{granting ? 'Enviando…' : 'Enviar senha'}</button>
+      <button type="button" onClick={() => setGrantingId(null)}>Fechar</button>
+    </form>}
     <form onSubmit={submit} className="quick">
       <input placeholder="Nome" required value={name} onChange={e => setName(e.target.value)} />
       <input type="tel" placeholder="(11) 99999-0000 (opcional)" value={phone} onChange={e => setPhone(maskPhone(e.target.value))} maxLength={16} />

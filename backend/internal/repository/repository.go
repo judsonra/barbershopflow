@@ -80,6 +80,49 @@ func (r *Repository) professionalExists(ctx context.Context, tenantID, professio
 	return exists, err
 }
 
+func (r *Repository) GetProfessionalByID(ctx context.Context, tenantID, id string) (domain.Professional, error) {
+	var item domain.Professional
+	err := r.db.QueryRow(ctx, `SELECT id, name, phone, email, cpf, active, created_at FROM professionals WHERE id=$1 AND tenant_id=$2`, id, tenantID).
+		Scan(&item.ID, &item.Name, &item.Phone, &item.Email, &item.CPF, &item.Active, &item.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return item, domain.ErrNotFound
+	}
+	return item, err
+}
+
+// UpdateProfessionalPhone lets the barber/gestor fill in/correct the phone
+// number at the moment they grant the professional access.
+func (r *Repository) UpdateProfessionalPhone(ctx context.Context, tenantID, professionalID, phone string) error {
+	tag, err := r.db.Exec(ctx, `UPDATE professionals SET phone=$3 WHERE id=$1 AND tenant_id=$2`, professionalID, tenantID, phone)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// UpsertProfessionalCredentials grants (or regenerates) a professional's
+// phone-login password — the same mechanism as UpsertClientCredentials,
+// just tied to professional_id/role=professional instead of customer_id.
+func (r *Repository) UpsertProfessionalCredentials(ctx context.Context, tenantID, professionalID, name, phone, passwordHash string) (domain.User, error) {
+	item := domain.User{}
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO users(tenant_id, name, phone, password_hash, role, professional_id)
+		VALUES($1,$2,$3,$4,'professional',$5)
+		ON CONFLICT (professional_id) WHERE professional_id IS NOT NULL DO UPDATE SET
+			name = EXCLUDED.name,
+			phone = EXCLUDED.phone,
+			password_hash = EXCLUDED.password_hash,
+			failed_login_attempts = 0,
+			locked_at = NULL
+		RETURNING `+userColumns,
+		tenantID, name, phone, passwordHash, professionalID).
+		Scan(userScanTargets(&item)...)
+	return item, err
+}
+
 func (r *Repository) GetProfessionalSchedule(ctx context.Context, tenantID, professionalID string) ([]domain.ScheduleEntry, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT weekday, start_minute, end_minute FROM professional_schedules
@@ -225,10 +268,11 @@ func (r *Repository) UpdateCustomerPhone(ctx context.Context, tenantID, customer
 	return nil
 }
 
-// ListAppointments returns the tenant's agenda in [from, to). When
-// customerID is non-empty (a client listing their own appointments), it
-// only returns that customer's appointments; staff pass "" to see everyone.
-func (r *Repository) ListAppointments(ctx context.Context, tenantID, customerID string, from, to time.Time) ([]domain.Appointment, error) {
+// ListAppointments returns the tenant's agenda in [from, to). customerID
+// scopes it to a single client's own bookings (see server.listAppointments);
+// professionalID scopes it to a single professional's own agenda. Staff
+// (manager) pass both empty to see everyone.
+func (r *Repository) ListAppointments(ctx context.Context, tenantID, customerID, professionalID string, from, to time.Time) ([]domain.Appointment, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT a.id, a.customer_id, c.name, a.professional_id, p.name, a.service_id, s.name,
 		       a.starts_at, a.ends_at, a.status, a.notes, a.price_cents, a.created_at
@@ -238,7 +282,8 @@ func (r *Repository) ListAppointments(ctx context.Context, tenantID, customerID 
 		JOIN services s ON s.id=a.service_id
 		WHERE a.tenant_id=$1 AND a.starts_at >= $2 AND a.starts_at < $3
 		  AND ($4 = '' OR a.customer_id::text = $4)
-		ORDER BY a.starts_at`, tenantID, from, to, customerID)
+		  AND ($5 = '' OR a.professional_id::text = $5)
+		ORDER BY a.starts_at`, tenantID, from, to, customerID, professionalID)
 	if err != nil {
 		return nil, err
 	}
