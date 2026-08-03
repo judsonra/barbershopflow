@@ -29,6 +29,12 @@ main { padding: 20px 18px; }
 .profile-info { display: grid; gap: 10px; margin-top: 20px; }
 .profile-info > div { background: white; border-radius: 11px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 14px #1e293b0a; }
 .profile-info small { color: #7b8290; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.field-status { position: relative; display: block; }
+.field-status input { padding-right: 38px; }
+.field-icon { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-weight: 700; font-size: 16px; }
+.field-icon.ok { color: #16a34a; }
+.field-icon.bad { color: #dc2626; }
+.field-error { color: #dc2626; font-size: 12px; }
 .fab { position: absolute; z-index: 5; right: 20px; bottom: calc(84px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border: 0; border-radius: 50%; background: #b68034; color: white; font-size: 28px; line-height: 1; display: grid; place-items: center; box-shadow: 0 8px 20px #0004; }
 nav { position: fixed; z-index: 4; bottom: 0; width: min(100%, 540px); background: #111827; display: flex; justify-content: space-around; padding: 10px 20px max(10px, env(safe-area-inset-bottom)); }
 nav button { background: none; border: 0; color: #9ca3af; display: grid; gap: 2px; font-size: 11px; min-width: 85px; }nav button span { font-size: 24px; }nav button.active { color: #d6a85f; }

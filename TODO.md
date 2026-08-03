@@ -24,6 +24,7 @@ atual (backend Go, frontend React/PWA, infra Docker).
 - [x] Incluir `tenant_id` na exclusion constraint `appointments_no_overlap`
 - [x] Onboarding self-service: `POST /api/v1/tenants` cria barbearia + gestor inicial numa transação e já faz login (tela "Cadastrar minha barbearia" no frontend)
 - [x] Estratégia de isolamento: coluna `tenant_id` compartilhada (decidido, ver migração `005_multi_tenant.sql`)
+- [x] Nome da barbearia único (não só o `slug` derivado dele), com checagem de disponibilidade em tempo real no cadastro (`GET /tenants/availability?name=`, debounce de 400ms) — ✓ verde/✗ vermelho ao lado do campo
 - [x] Acesso administrativo global: papel `superadmin` (hoje só `admin@barberflow.local`) lista todas as barbearias (`GET /api/v1/admin/tenants`) e "acessa" uma virando o gestor dela (`POST /api/v1/admin/tenants/{id}/impersonate`) — painel próprio no frontend, sem bypass de tenant em nenhum outro endpoint
 - [ ] Tela de gestão do próprio tenant (trocar nome/slug da barbearia, ver dados da conta)
 - [ ] Página de billing/planos, se o produto for monetizado por barbearia

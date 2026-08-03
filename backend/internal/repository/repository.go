@@ -501,6 +501,15 @@ func (r *Repository) GetFirstManagerByTenant(ctx context.Context, tenantID strin
 		SELECT `+userColumns+` FROM users WHERE tenant_id=$1 AND role='manager' ORDER BY created_at LIMIT 1`, tenantID))
 }
 
+// TenantNameAvailable backs the real-time name check on the signup form.
+// Best-effort only — the unique index on tenants(lower(name)) is what
+// actually prevents a race between the check and the real signup.
+func (r *Repository) TenantNameAvailable(ctx context.Context, name string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tenants WHERE lower(name)=lower($1))`, name).Scan(&exists)
+	return !exists, err
+}
+
 // GetTenantBySlug is used both by tenant onboarding (uniqueness check) and
 // by OAuth self-registration to resolve the ?tenant=<slug> query param.
 func (r *Repository) GetTenantBySlug(ctx context.Context, slug string) (domain.Tenant, error) {

@@ -43,6 +43,7 @@ type Store interface {
 	IncrementFailedLogin(context.Context, string) (bool, error)
 	UpsertClientCredentials(ctx context.Context, tenantID, customerID, name, phone, passwordHash string) (domain.User, error)
 	GetTenantBySlug(ctx context.Context, slug string) (domain.Tenant, error)
+	TenantNameAvailable(ctx context.Context, name string) (bool, error)
 	ListTenants(ctx context.Context) ([]domain.Tenant, error)
 	GetFirstManagerByTenant(ctx context.Context, tenantID string) (domain.User, error)
 	GetTenantByID(ctx context.Context, id string) (domain.Tenant, error)
@@ -80,6 +81,7 @@ func New(store Store, cfg Config) http.Handler {
 	public.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	public.HandleFunc("GET /api/v1/tenants/availability", s.checkTenantName)
 	public.HandleFunc("POST /api/v1/tenants", s.createTenant)
 	public.HandleFunc("POST /api/v1/auth/login", s.login)
 	public.HandleFunc("POST /api/v1/auth/refresh", s.refresh)
@@ -117,6 +119,24 @@ func New(store Store, cfg Config) http.Handler {
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 var emailPattern = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
+
+// checkTenantName backs the real-time availability check on the signup
+// form. Public and best-effort by nature (a name-taken race is still
+// possible between this check and the real POST /tenants — that path
+// stays authoritative via the unique index).
+func (s *server) checkTenantName(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if name == "" {
+		writeJSON(w, http.StatusOK, map[string]bool{"available": false})
+		return
+	}
+	available, err := s.store.TenantNameAvailable(r.Context(), name)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"available": available})
+}
 
 // createTenant is the self-service onboarding flow: a new barbershop signs
 // itself up, no invite or manual provisioning needed. Creates the tenant

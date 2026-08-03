@@ -115,6 +115,18 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
   const [info, setInfo] = useState('')
   const [loading, setLoading] = useState(false)
   const [signup, setSignup] = useState({ tenantName: '', managerName: '', email: '', password: '' })
+  const [nameStatus, setNameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle')
+
+  useEffect(() => {
+    const name = signup.tenantName.trim()
+    if (!name) { setNameStatus('idle'); return }
+    setNameStatus('checking')
+    const timeout = setTimeout(async () => {
+      try { setNameStatus((await api.checkTenantName(name)).available ? 'available' : 'taken') }
+      catch { setNameStatus('idle') }
+    }, 400)
+    return () => clearTimeout(timeout)
+  }, [signup.tenantName])
 
   async function submitEmail(event: FormEvent) {
     event.preventDefault(); setLoading(true); setError('')
@@ -125,6 +137,7 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
 
   async function submitSignup(event: FormEvent) {
     event.preventDefault(); setError('')
+    if (nameStatus === 'taken') { setError('Nome já em uso.'); return }
     // Some mobile browsers (notably installed PWAs) silently swallow the
     // native minLength validation bubble instead of showing it — the form
     // just sits there with no feedback. Check explicitly so there's always
@@ -183,7 +196,14 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
 
         {mode === 'signup' && <>
           <form onSubmit={submitSignup}>
-            <label>Nome da barbearia<input required value={signup.tenantName} onChange={e => setSignup({ ...signup, tenantName: e.target.value })} /></label>
+            <label>Nome da barbearia
+              <span className="field-status">
+                <input required value={signup.tenantName} onChange={e => setSignup({ ...signup, tenantName: e.target.value })} />
+                {nameStatus === 'available' && <span className="field-icon ok" aria-label="Nome disponível">✓</span>}
+                {nameStatus === 'taken' && <span className="field-icon bad" aria-label="Nome já em uso">✗</span>}
+              </span>
+              {nameStatus === 'taken' && <small className="field-error">Nome já em uso</small>}
+            </label>
             <label>Seu nome<input required value={signup.managerName} onChange={e => setSignup({ ...signup, managerName: e.target.value })} /></label>
             <label>E-mail<input type="email" required autoComplete="username" value={signup.email} onChange={e => setSignup({ ...signup, email: e.target.value })} /></label>
             <label>Senha<input type="password" required minLength={8} autoComplete="new-password" value={signup.password} onChange={e => setSignup({ ...signup, password: e.target.value })} /></label>

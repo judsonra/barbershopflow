@@ -32,6 +32,7 @@ Há três formas de autenticar, dependendo de quem tem e-mail e quem não tem:
 
 | Método | Rota | Descrição | Autenticação |
 |---|---|---|---|
+| GET | `/tenants/availability?name=` | Checa se o nome da barbearia está disponível | pública |
 | POST | `/tenants` | Cria uma barbearia nova + gestor inicial; já retorna tokens (auto-login) | pública |
 | POST | `/auth/login` | Login com e-mail+senha ou celular+senha | pública |
 | POST | `/auth/refresh` | Troca um refresh token válido por um novo access token | pública |
@@ -104,9 +105,11 @@ Cada barbearia é um `tenant`, criado via `POST /tenants`:
 ```
 
 Resposta igual à de login (`access_token`, `refresh_token`, `user`), já
-autenticado como gestor da barbearia recém-criada. `slug` só aceita letras
-minúsculas, números e hífen, e precisa ser único (`409 conflict`, assim como
-e-mail duplicado). Login social (Google/Facebook) de um cliente totalmente
+autenticado como gestor da barbearia recém-criada. `tenant_name` também
+precisa ser único (case-insensitive) — `GET /tenants/availability?name=`
+checa em tempo real, mas a checagem definitiva é sempre no `POST` (`409
+conflict`, assim como `slug`/e-mail duplicado). `slug` só aceita letras
+minúsculas, números e hífen. Login social (Google/Facebook) de um cliente totalmente
 novo — sem conta existente com aquele e-mail — também precisa saber em qual
 barbearia se cadastrar: passe `?tenant=<slug>` em `/auth/google/start` ou
 `/auth/facebook/start`.
