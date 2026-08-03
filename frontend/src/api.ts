@@ -97,6 +97,14 @@ export const api = {
     storeTokens(result.access_token, result.refresh_token)
     return result.user
   },
+  listTenantsAdmin: () => request<Tenant[]>('/admin/tenants'),
+  impersonateTenant: async (tenantId: string) => {
+    const result = await request<{ access_token: string; refresh_token: string; user: User }>(
+      `/admin/tenants/${tenantId}/impersonate`, { method: 'POST' }
+    )
+    storeTokens(result.access_token, result.refresh_token)
+    return result.user
+  },
   loginByPhone: async (phone: string, password: string) => {
     const data = await request<{ access_token: string; refresh_token: string; user: User }>(
       '/auth/login', { method: 'POST', body: JSON.stringify({ phone, password }) }

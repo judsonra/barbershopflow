@@ -19,6 +19,12 @@
 - **Gestor/recepção:** opera catálogo, profissionais, clientes e agenda.
   Autentica com papel `manager`; único papel autorizado a cadastrar serviços e
   profissionais.
+- **Superadmin:** operador da plataforma, sem barbearia própria — hoje só
+  `admin@barberflow.local` (seed da migração `009_superadmin_seed.sql`).
+  Só lista as barbearias e "acessa" uma virando o gestor de verdade dela
+  (`POST /api/v1/admin/tenants/{id}/impersonate`); não tem nenhum atalho nos
+  demais endpoints, que continuam scoped a um único tenant como sempre. Ver
+  [docs/api.md](api.md).
 
 Staff (gestor/profissional) loga por e-mail e senha (`POST /api/v1/auth/login`)
 ou por login social com o mesmo e-mail da conta — que funciona como

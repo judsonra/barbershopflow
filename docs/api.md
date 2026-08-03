@@ -53,6 +53,8 @@ Há três formas de autenticar, dependendo de quem tem e-mail e quem não tem:
 | POST | `/customers/{id}/credentials` | Concede/renova acesso por celular a um cliente | `manager` ou `professional` |
 | GET | `/tenant` | Configurações da própria barbearia | qualquer papel |
 | PATCH | `/tenant` | Liga/desliga autoagendamento e auto-confirmação | `manager` |
+| GET | `/admin/tenants` | Lista todas as barbearias da plataforma | `superadmin` |
+| POST | `/admin/tenants/{id}/impersonate` | Vira o gestor daquela barbearia (novo access/refresh token) | `superadmin` |
 | GET | `/appointments?from=&to=` | Lista agenda no período (`client` só vê os próprios) | qualquer papel |
 | POST | `/appointments` | Cria agendamento; `client` só se autoagendamento estiver ligado, ver "Autoagendamento" | qualquer papel |
 | PATCH | `/appointments/{id}/status` | Altera estado | `manager`/`professional` (profissional só no próprio agendamento); `client` não pode |
@@ -60,7 +62,7 @@ Há três formas de autenticar, dependendo de quem tem e-mail e quem não tem:
 Exemplo de login por e-mail:
 
 ```json
-{ "email": "admin@barberflow.local", "password": "change-me" }
+{ "email": "gestor@barberflow.local", "password": "change-me" }
 ```
 
 Exemplo de login por celular:
@@ -75,15 +77,17 @@ Resposta (ambos os casos):
 {
   "access_token": "...",
   "refresh_token": "...",
-  "user": { "id": "uuid", "name": "Administrador", "email": "admin@barberflow.local", "role": "manager", "active": true }
+  "user": { "id": "uuid", "name": "Gestor Demo", "email": "gestor@barberflow.local", "role": "manager", "active": true }
 }
 ```
 
-O usuário gestor inicial (`admin@barberflow.local` / `change-me`, criado pela
-migração `002_users.sql`) deve trocar a senha assim que possível — use o
-login social com o mesmo e-mail para trocar de método de acesso sem depender
-da senha atual; até lá, trate essa credencial como sensível e restrinja o
-acesso à API a redes confiáveis.
+O gestor inicial da barbearia demo (`gestor@barberflow.local` / `change-me`)
+e o superadmin da plataforma (`admin@barberflow.local` / `change-me`, ver
+seção "Acesso administrativo" abaixo), ambos criados pelas migrações
+`002_users.sql`/`009_superadmin_seed.sql`, devem trocar a senha assim que
+possível — use o login social com o mesmo e-mail para trocar de método de
+acesso sem depender da senha atual; até lá, trate essas credenciais como
+sensíveis e restrinja o acesso à API a redes confiáveis.
 
 ## Multi-tenant
 
@@ -112,6 +116,22 @@ globalmente únicos entre barbearias — uma pessoa pertence a uma única
 barbearia por vez. O isolamento que importa é o dos dados de negócio
 (serviços, profissionais, clientes, agendamentos), sempre filtrados pelo
 `tenant_id` do token.
+
+### Acesso administrativo (superadmin)
+
+O papel `superadmin` é o operador da plataforma, sem barbearia própria —
+hoje só a conta seed `admin@barberflow.local` tem esse papel (migração
+`009_superadmin_seed.sql`). Ele não opera nenhum endpoint de dados
+diretamente: `GET /admin/tenants` lista todas as barbearias e
+`POST /admin/tenants/{id}/impersonate` devolve um access/refresh token novo
+para o **gestor de verdade** daquela barbearia (mesmo formato de resposta do
+login). A partir daí, todo o resto da API funciona exatamente igual, sem
+nenhuma checagem especial de superadmin em nenhum outro handler.
+
+Isso significa que uma barbearia sem nenhum gestor não pode ser
+impersonada — `impersonate` responde `404`. Toda barbearia criada via
+`POST /tenants` já vem com um gestor por construção, então isso só seria um
+problema em caso de remoção manual de dados.
 
 ## Autoagendamento
 

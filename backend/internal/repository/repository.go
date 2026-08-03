@@ -471,6 +471,33 @@ func scanTenant(item *domain.Tenant) []any {
 	return []any{&item.ID, &item.Name, &item.Slug, &item.SelfSchedulingEnabled, &item.AutoConfirmAppointments, &item.Active, &item.CreatedAt}
 }
 
+// ListTenants is superadmin-only: every other query in this file is
+// deliberately scoped to a single tenant.
+func (r *Repository) ListTenants(ctx context.Context) ([]domain.Tenant, error) {
+	rows, err := r.db.Query(ctx, `SELECT `+tenantColumns+` FROM tenants ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.Tenant{}
+	for rows.Next() {
+		var item domain.Tenant
+		if err := rows.Scan(scanTenant(&item)...); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// GetFirstManagerByTenant backs superadmin impersonation: hand back the
+// tenant's own oldest manager account and issue tokens for it, rather than
+// minting a token for a user row that doesn't match its claims.
+func (r *Repository) GetFirstManagerByTenant(ctx context.Context, tenantID string) (domain.User, error) {
+	return r.scanUser(r.db.QueryRow(ctx, `
+		SELECT `+userColumns+` FROM users WHERE tenant_id=$1 AND role='manager' ORDER BY created_at LIMIT 1`, tenantID))
+}
+
 // GetTenantBySlug is used both by tenant onboarding (uniqueness check) and
 // by OAuth self-registration to resolve the ?tenant=<slug> query param.
 func (r *Repository) GetTenantBySlug(ctx context.Context, slug string) (domain.Tenant, error) {

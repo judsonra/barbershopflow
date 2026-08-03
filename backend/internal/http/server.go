@@ -43,6 +43,8 @@ type Store interface {
 	IncrementFailedLogin(context.Context, string) (bool, error)
 	UpsertClientCredentials(ctx context.Context, tenantID, customerID, name, phone, passwordHash string) (domain.User, error)
 	GetTenantBySlug(ctx context.Context, slug string) (domain.Tenant, error)
+	ListTenants(ctx context.Context) ([]domain.Tenant, error)
+	GetFirstManagerByTenant(ctx context.Context, tenantID string) (domain.User, error)
 	GetTenantByID(ctx context.Context, id string) (domain.Tenant, error)
 	UpdateTenantSettings(ctx context.Context, tenantID string, selfSchedulingEnabled, autoConfirmAppointments bool) (domain.Tenant, error)
 	GetProfessionalSchedule(ctx context.Context, tenantID, professionalID string) ([]domain.ScheduleEntry, error)
@@ -89,6 +91,8 @@ func New(store Store, cfg Config) http.Handler {
 
 	protected := http.NewServeMux()
 	protected.HandleFunc("GET /api/v1/auth/me", s.me)
+	protected.HandleFunc("GET /api/v1/admin/tenants", s.requireRole(domain.RoleSuperAdmin, s.listTenantsAdmin))
+	protected.HandleFunc("POST /api/v1/admin/tenants/{id}/impersonate", s.requireRole(domain.RoleSuperAdmin, s.impersonateTenant))
 	protected.HandleFunc("GET /api/v1/tenant", s.getTenant)
 	protected.HandleFunc("PATCH /api/v1/tenant", s.requireRole(domain.RoleManager, s.updateTenant))
 	protected.HandleFunc("GET /api/v1/services", s.listServices)
@@ -376,6 +380,28 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := s.store.GetUserByID(r.Context(), claims.UserID)
 	respond(w, user, err)
+}
+
+func (s *server) listTenantsAdmin(w http.ResponseWriter, r *http.Request) {
+	items, err := s.store.ListTenants(r.Context())
+	respond(w, items, err)
+}
+
+// impersonateTenant is how a superadmin "accesses" a barbershop: rather
+// than bypassing tenant scoping across every endpoint, it hands back a
+// normal access/refresh token pair for that tenant's own manager account,
+// so everything downstream (every other handler in this file) works
+// completely unchanged.
+func (s *server) impersonateTenant(w http.ResponseWriter, r *http.Request) {
+	claims, _ := claimsFromContext(r)
+	tenantID := r.PathValue("id")
+	manager, err := s.store.GetFirstManagerByTenant(r.Context(), tenantID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	log.Printf("superadmin %s impersonating tenant %s as manager %s", claims.UserID, tenantID, manager.ID)
+	s.issueTokens(w, manager)
 }
 
 // getTenant is used by the client app to know whether self-scheduling is

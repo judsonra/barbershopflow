@@ -1,6 +1,6 @@
 export type User = {
   id: string; name: string; email?: string; phone?: string
-  role: 'manager' | 'professional' | 'client'; professional_id?: string; customer_id?: string; active: boolean
+  role: 'manager' | 'professional' | 'client' | 'superadmin'; professional_id?: string; customer_id?: string; active: boolean
 }
 export type Tenant = {
   id: string; name: string; slug: string

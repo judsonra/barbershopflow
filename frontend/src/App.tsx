@@ -32,7 +32,49 @@ export default function App() {
 
   if (checkingSession) return <div className="empty">Carregando…</div>
   if (!user) return <Login onLogin={setUser} initialError={oauthError} />
+  if (user.role === 'superadmin') return <AdminPanel user={user} onImpersonate={setUser} onLogout={() => { api.logout(); setUser(null) }} />
   return <AgendaApp user={user} onLogout={() => { api.logout(); setUser(null) }} />
+}
+
+// A superadmin doesn't operate inside any single tenant — it only lists
+// barbershops and "becomes" one's manager to actually do anything (see
+// docs/api.md). Logging back out returns to this same login; to switch
+// back to the admin view, log in again with the superadmin account.
+function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersonate: (user: User) => void; onLogout: () => void }) {
+  const [tenants, setTenants] = useState<Tenant[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
+    try { setTenants(await api.listTenantsAdmin()) }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { void load() }, [load])
+
+  async function access(tenantId: string) {
+    setError('')
+    try { onImpersonate(await api.impersonateTenant(tenantId)) }
+    catch (err) { setError(errorMessage(err)) }
+  }
+
+  return <div className="app-shell">
+    <header>
+      <div><span className="eyebrow">SUPERADMIN</span><h1>Barbearias</h1></div>
+      <button className="avatar" title={`${user.name} · Sair`} onClick={onLogout}>{user.name.slice(0, 2).toUpperCase()}</button>
+    </header>
+    <main>
+      {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
+      {loading ? <div className="empty">Carregando…</div> :
+        tenants.length === 0 ? <div className="empty"><span>🏠</span><h2>Nenhuma barbearia</h2></div> :
+        <ul className="tenant-list">{tenants.map(t => <li key={t.id}>
+          <div><b>{t.name}</b><small>{t.slug}{!t.active ? ' · inativa' : ''}</small></div>
+          <button onClick={() => void access(t.id)}>Acessar como gestor</button>
+        </li>)}</ul>}
+    </main>
+  </div>
 }
 
 type LoginMode = 'email' | 'phone' | 'recover' | 'signup'

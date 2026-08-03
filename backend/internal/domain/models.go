@@ -31,6 +31,11 @@ const (
 	RoleManager      = "manager"
 	RoleProfessional = "professional"
 	RoleClient       = "client"
+	// RoleSuperAdmin is the platform operator: not scoped to any tenant's
+	// data directly. It only lists tenants and impersonates a tenant's
+	// manager (see server.impersonateTenant) — every other endpoint stays
+	// scoped to a single tenant, so this role never needs to bypass that.
+	RoleSuperAdmin = "superadmin"
 )
 
 // MaxLoginAttempts is the number of failed password attempts allowed before
