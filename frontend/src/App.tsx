@@ -268,6 +268,9 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
       {tab === 'hours' && <ScheduleManager user={user} professionals={professionals} />}
     </main>
 
+    {tab === 'agenda' && (!isClient || tenant?.self_scheduling_enabled) &&
+      <button className="fab" aria-label="Novo agendamento" title="Novo agendamento" onClick={() => setTab('new')}>+</button>}
+
     <nav>
       <button className={tab === 'agenda' ? 'active' : ''} onClick={() => setTab('agenda')}><span>▦</span>Agenda</button>
       {(!isClient || tenant?.self_scheduling_enabled) &&
