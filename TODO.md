@@ -52,6 +52,8 @@ atual (backend Go, frontend React/PWA, infra Docker).
 - [ ] Paginação em `ListServices`/`ListProfessionals`/`ListCustomers` (hoje retornam tudo sem limite)
 - [x] Padronizar campos de hora em 24h: toda hora renderizada pelo app (card da agenda, cabeçalho do dia, lista de bloqueios) usa `hour12: false` explícito, garantido independente do navegador. Os seletores nativos (`type="time"`/`type="datetime-local"`) ganharam `lang="pt-BR"` como dica de melhor esforço, mas o formato exibido por eles (24h vs AM/PM) segue o idioma do navegador/SO do usuário, não a página — confirmado testando com locale forçado em inglês. Decisão registrada: manter o seletor nativo (melhor UX mobile) em vez de trocar por campo de texto com máscara, já que o público-alvo (BR) normalmente já usa o aparelho em pt-BR
 - [x] Cadastro de cliente ganhou campo de e-mail no formulário de cadastro rápido (backend já suportava desde o MVP)
+- [x] Máscara de celular `(DDD) 9XXXX-XXXX` em todo campo de telefone (login, recuperação, cadastro rápido de cliente); convertido para E.164 (`+55...`) antes de qualquer chamada à API, formato que casa com o que o Zenvia precisa para enviar SMS/WhatsApp de verdade
+- [x] Validação explícita de e-mail (JS, não só `type="email"` do navegador) no cadastro de barbearia e no cadastro rápido de cliente — mesmo raciocínio do bug de senha curta: validação só nativa pode não aparecer em navegador/WebView mobile
 
 ## 5. Evolução mobile / PWA → produto instalável completo
 

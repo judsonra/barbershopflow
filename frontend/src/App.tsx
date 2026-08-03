@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './api'
 import { downloadICS, googleCalendarUrl } from './calendar'
+import { isValidEmail, maskPhone, toE164BR } from './validation'
 import type { Appointment, Customer, Professional, Service, Tenant, TimeOff, User } from './types'
 
 function errorMessage(err: unknown) {
@@ -108,6 +109,7 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
     // just sits there with no feedback. Check explicitly so there's always
     // a visible message.
     if (signup.password.length < 8) { setError('A senha deve ter pelo menos 8 caracteres.'); return }
+    if (!isValidEmail(signup.email)) { setError('Informe um e-mail válido.'); return }
     setLoading(true)
     try {
       onLogin(await api.createTenant({
@@ -121,7 +123,7 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
 
   async function submitPhone(event: FormEvent) {
     event.preventDefault(); setLoading(true); setError('')
-    try { onLogin(await api.loginByPhone(phone, password)) }
+    try { onLogin(await api.loginByPhone(toE164BR(phone), password)) }
     catch (err) {
       if (err instanceof ApiError && err.code === 'account_locked') { setMode('recover'); setError('') }
       else setError(errorMessage(err))
@@ -131,7 +133,7 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
 
   async function submitRecover(event: FormEvent) {
     event.preventDefault(); setLoading(true); setError(''); setInfo('')
-    try { setInfo((await api.recoverPhone(phone)).message) }
+    try { setInfo((await api.recoverPhone(toE164BR(phone))).message) }
     catch (err) { setError(errorMessage(err)) }
     finally { setLoading(false) }
   }
@@ -171,7 +173,7 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
 
         {mode === 'phone' && <>
           <form onSubmit={submitPhone}>
-            <label>Celular<input type="tel" required autoComplete="tel" placeholder="(11) 99999-0000" value={phone} onChange={e => setPhone(e.target.value)} /></label>
+            <label>Celular<input type="tel" required autoComplete="tel" placeholder="(11) 99999-0000" value={phone} onChange={e => setPhone(maskPhone(e.target.value))} maxLength={16} /></label>
             <label>Senha<input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label>
             <button className="primary" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
           </form>
@@ -183,7 +185,7 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
           {info
             ? <p>{info}</p>
             : <form onSubmit={submitRecover}>
-                <label>Celular cadastrado<input type="tel" required autoComplete="tel" placeholder="(11) 99999-0000" value={phone} onChange={e => setPhone(e.target.value)} /></label>
+                <label>Celular cadastrado<input type="tel" required autoComplete="tel" placeholder="(11) 99999-0000" value={phone} onChange={e => setPhone(maskPhone(e.target.value))} maxLength={16} /></label>
                 <button className="primary" disabled={loading}>{loading ? 'Enviando…' : 'Receber nova senha por SMS/WhatsApp'}</button>
               </form>}
           <button type="button" className="link-button" onClick={() => { setMode('phone'); setError(''); setInfo('') }}>Voltar para o login</button>
@@ -424,13 +426,17 @@ function NewAppointment({ user, tenant, services, professionals, customers, onDo
   const [accessMessage, setAccessMessage] = useState('')
   async function addCustomer() {
     if (!name.trim()) return
-    const customer = await api.createCustomer({ name, phone, email })
-    setList(v => [...v, customer]); setForm(v => ({ ...v, customer_id: customer.id })); setName(''); setPhone(''); setEmail('')
-    if (grantAccess && phone.trim()) {
-      try { setAccessMessage((await api.grantCustomerAccess(customer.id, phone)).message) }
-      catch (err) { setError(errorMessage(err)) }
+    setError('')
+    if (email.trim() && !isValidEmail(email.trim())) { setError('Informe um e-mail válido ou deixe em branco.'); return }
+    try {
+      const customer = await api.createCustomer({ name, phone: toE164BR(phone), email })
+      setList(v => [...v, customer]); setForm(v => ({ ...v, customer_id: customer.id })); setName(''); setPhone(''); setEmail('')
+      if (grantAccess && phone.trim()) {
+        setAccessMessage((await api.grantCustomerAccess(customer.id, toE164BR(phone))).message)
+      }
     }
-    setGrantAccess(false)
+    catch (err) { setError(errorMessage(err)) }
+    finally { setGrantAccess(false) }
   }
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError('')
@@ -447,7 +453,7 @@ function NewAppointment({ user, tenant, services, professionals, customers, onDo
         <label>Cliente<select required value={form.customer_id} onChange={e => setForm({ ...form, customer_id: e.target.value })}><option value="">Selecione</option>{list.map(x => <option value={x.id} key={x.id}>{x.name}</option>)}</select></label>
         <details><summary>Cadastrar cliente rápido</summary><div className="quick">
           <input placeholder="Nome" value={name} onChange={e => setName(e.target.value)} />
-          <input placeholder="Telefone" value={phone} onChange={e => setPhone(e.target.value)} />
+          <input type="tel" placeholder="(11) 99999-0000" value={phone} onChange={e => setPhone(maskPhone(e.target.value))} maxLength={16} />
           <input type="email" placeholder="E-mail (opcional)" value={email} onChange={e => setEmail(e.target.value)} />
           <label className="checkbox"><input type="checkbox" checked={grantAccess} onChange={e => setGrantAccess(e.target.checked)} /> Enviar acesso ao app por SMS/WhatsApp (cliente sem e-mail)</label>
           {accessMessage && <p>{accessMessage}</p>}
