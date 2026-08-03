@@ -122,7 +122,11 @@ export const api = {
   updateTenant: (data: { self_scheduling_enabled: boolean; auto_confirm_appointments: boolean }) =>
     request<Tenant>('/tenant', { method: 'PATCH', body: JSON.stringify(data) }),
   services: () => request<Service[]>('/services'),
+  createService: (data: { name: string; duration_minutes: number; price_cents: number }) =>
+    request<Service>('/services', { method: 'POST', body: JSON.stringify(data) }),
   professionals: () => request<Professional[]>('/professionals'),
+  createProfessional: (data: { name: string; phone?: string }) =>
+    request<Professional>('/professionals', { method: 'POST', body: JSON.stringify(data) }),
   getSchedule: (professionalId: string) => request<ScheduleEntry[]>(`/professionals/${professionalId}/schedule`),
   setSchedule: (professionalId: string, entries: ScheduleEntry[]) =>
     request<ScheduleEntry[]>(`/professionals/${professionalId}/schedule`, { method: 'PUT', body: JSON.stringify({ entries }) }),

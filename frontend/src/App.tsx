@@ -8,6 +8,7 @@ function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : 'Erro inesperado'
 }
 
+const roleLabel: Record<string, string> = { manager: 'Gestor', professional: 'Profissional', client: 'Cliente', superadmin: 'Superadmin' }
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 const dateTime = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })
 const statusLabel = { scheduled: 'Agendado', confirmed: 'Confirmado', completed: 'Concluído', cancelled: 'Cancelado' }
@@ -42,6 +43,7 @@ export default function App() {
 // docs/api.md). Logging back out returns to this same login; to switch
 // back to the admin view, log in again with the superadmin account.
 function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersonate: (user: User) => void; onLogout: () => void }) {
+  const [view, setView] = useState<'tenants' | 'profile'>('tenants')
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -64,18 +66,37 @@ function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersona
   return <div className="app-shell">
     <header>
       <div><span className="eyebrow">SUPERADMIN</span><h1>Barbearias</h1></div>
-      <button className="avatar" title={`${user.name} · Sair`} onClick={onLogout}>{user.name.slice(0, 2).toUpperCase()}</button>
+      <button className="avatar" title={`${user.name} · Perfil`} onClick={() => setView('profile')}>{user.name.slice(0, 2).toUpperCase()}</button>
     </header>
     <main>
-      {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
-      {loading ? <div className="empty">Carregando…</div> :
-        tenants.length === 0 ? <div className="empty"><span>🏠</span><h2>Nenhuma barbearia</h2></div> :
-        <ul className="tenant-list">{tenants.map(t => <li key={t.id}>
-          <div><b>{t.name}</b><small>{t.slug}{!t.active ? ' · inativa' : ''}</small></div>
-          <button onClick={() => void access(t.id)}>Acessar como gestor</button>
-        </li>)}</ul>}
+      {view === 'profile' ? <Profile user={user} onLogout={onLogout} onBack={() => setView('tenants')} /> : <>
+        {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
+        {loading ? <div className="empty">Carregando…</div> :
+          tenants.length === 0 ? <div className="empty"><span>🏠</span><h2>Nenhuma barbearia</h2></div> :
+          <ul className="tenant-list">{tenants.map(t => <li key={t.id}>
+            <div><b>{t.name}</b><small>{t.slug}{!t.active ? ' · inativa' : ''}</small></div>
+            <button onClick={() => void access(t.id)}>Acessar como gestor</button>
+          </li>)}</ul>}
+      </>}
     </main>
   </div>
+}
+
+// Shared by AgendaApp and AdminPanel: shows the signed-in account's own
+// data and is the only place "Sair" lives, so clicking the avatar never
+// logs anyone out by surprise anymore.
+function Profile({ user, onLogout, onBack }: { user: User; onLogout: () => void; onBack: () => void }) {
+  return <section className="form-page">
+    <span className="eyebrow">PERFIL</span><h2>{user.name}</h2>
+    <div className="profile-info">
+      <div><small>Papel</small><b>{roleLabel[user.role] ?? user.role}</b></div>
+      {user.email && <div><small>E-mail</small><b>{user.email}</b></div>}
+      {user.phone && <div><small>Celular</small><b>{user.phone}</b></div>}
+      <div><small>Status</small><b>{user.active ? 'Ativo' : 'Inativo'}</b></div>
+    </div>
+    <button className="primary danger" onClick={onLogout}>Sair</button>
+    <button type="button" className="link-button" onClick={onBack}>Voltar</button>
+  </section>
 }
 
 type LoginMode = 'email' | 'phone' | 'recover' | 'signup'
@@ -197,7 +218,7 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
 
 function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   const isClient = user.role === 'client'
-  const [tab, setTab] = useState<'agenda' | 'new' | 'config' | 'hours'>('agenda')
+  const [tab, setTab] = useState<'agenda' | 'new' | 'config' | 'hours' | 'profile'>('agenda')
   const [offset, setOffset] = useState(0)
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [services, setServices] = useState<Service[]>([])
@@ -231,7 +252,7 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   return <div className="app-shell">
     <header>
       <div><span className="eyebrow">BARBERFLOW</span><h1>Sua agenda</h1></div>
-      <button className="avatar" title={`${user.name} · Sair`} onClick={onLogout}>{user.name.slice(0, 2).toUpperCase()}</button>
+      <button className="avatar" title={`${user.name} · Perfil`} onClick={() => setTab('profile')}>{user.name.slice(0, 2).toUpperCase()}</button>
     </header>
 
     <main>
@@ -263,8 +284,13 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
       </>}
       {tab === 'new' && <NewAppointment user={user} tenant={tenant} services={services} professionals={professionals} customers={customers}
         onDone={async () => { setTab('agenda'); setOffset(0); await load() }} />}
-      {tab === 'config' && tenant && <TenantConfig tenant={tenant} onSaved={t => setTenant(t)} />}
+      {tab === 'config' && tenant && <>
+        <TenantConfig tenant={tenant} onSaved={t => setTenant(t)} />
+        <ServicesManager services={services} onCreated={s => setServices(v => [...v, s])} />
+        <ProfessionalsManager professionals={professionals} onCreated={p => setProfessionals(v => [...v, p])} />
+      </>}
       {tab === 'hours' && <ScheduleManager user={user} professionals={professionals} />}
+      {tab === 'profile' && <Profile user={user} onLogout={onLogout} onBack={() => setTab('agenda')} />}
     </main>
 
     {tab === 'agenda' && (!isClient || tenant?.self_scheduling_enabled) &&
@@ -304,6 +330,68 @@ function TenantConfig({ tenant, onSaved }: { tenant: Tenant; onSaved: (tenant: T
         ? (autoConfirm ? 'O horário do cliente já entra confirmado e reservado.' : 'O horário do cliente fica reservado como pendente até o profissional confirmar.')
         : 'Só a equipe cria agendamentos.'}</p>
       <button className="primary" disabled={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
+    </form>
+  </section>
+}
+
+function ServicesManager({ services, onCreated }: { services: Service[]; onCreated: (service: Service) => void }) {
+  const [name, setName] = useState(''); const [duration, setDuration] = useState('30'); const [price, setPrice] = useState('')
+  const [saving, setSaving] = useState(false); const [error, setError] = useState('')
+
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setError('')
+    const durationMinutes = Number(duration)
+    const priceCents = Math.round(Number(price.replace(',', '.')) * 100)
+    if (!Number.isFinite(durationMinutes) || durationMinutes < 5 || durationMinutes > 480) {
+      setError('Duração deve ser entre 5 e 480 minutos.'); return
+    }
+    if (!price.trim() || !Number.isFinite(priceCents) || priceCents < 0) { setError('Informe um preço válido.'); return }
+    setSaving(true)
+    try {
+      onCreated(await api.createService({ name, duration_minutes: durationMinutes, price_cents: priceCents }))
+      setName(''); setDuration('30'); setPrice('')
+    }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setSaving(false) }
+  }
+
+  return <section className="form-page"><h2>Serviços</h2>
+    {error && <div className="alert">{error}</div>}
+    {services.length === 0 ? <p>Nenhum serviço cadastrado.</p> : <ul className="tenant-list">
+      {services.map(s => <li key={s.id}><div><b>{s.name}</b><small>{s.duration_minutes} min · {money.format(s.price_cents / 100)}{!s.active ? ' · inativo' : ''}</small></div></li>)}
+    </ul>}
+    <form onSubmit={submit} className="quick">
+      <input placeholder="Nome" required value={name} onChange={e => setName(e.target.value)} />
+      <input type="number" min={5} max={480} placeholder="Duração (minutos)" required value={duration} onChange={e => setDuration(e.target.value)} />
+      <input type="text" inputMode="decimal" placeholder="Preço (R$)" required value={price} onChange={e => setPrice(e.target.value)} />
+      <button disabled={saving}>{saving ? 'Adicionando…' : 'Adicionar serviço'}</button>
+    </form>
+  </section>
+}
+
+function ProfessionalsManager({ professionals, onCreated }: { professionals: Professional[]; onCreated: (professional: Professional) => void }) {
+  const [name, setName] = useState(''); const [phone, setPhone] = useState('')
+  const [saving, setSaving] = useState(false); const [error, setError] = useState('')
+
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setSaving(true); setError('')
+    try {
+      onCreated(await api.createProfessional({ name, phone: toE164BR(phone) }))
+      setName(''); setPhone('')
+    }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setSaving(false) }
+  }
+
+  return <section className="form-page"><h2>Profissionais</h2>
+    {error && <div className="alert">{error}</div>}
+    {professionals.length === 0 ? <p>Nenhum profissional cadastrado.</p> : <ul className="tenant-list">
+      {professionals.map(p => <li key={p.id}><div><b>{p.name}</b>{!p.active && <small> · inativo</small>}</div></li>)}
+    </ul>}
+    <form onSubmit={submit} className="quick">
+      <input placeholder="Nome" required value={name} onChange={e => setName(e.target.value)} />
+      <input type="tel" placeholder="(11) 99999-0000 (opcional)" value={phone} onChange={e => setPhone(maskPhone(e.target.value))} maxLength={16} />
+      <button disabled={saving}>{saving ? 'Adicionando…' : 'Adicionar profissional'}</button>
     </form>
   </section>
 }

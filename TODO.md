@@ -54,6 +54,9 @@ atual (backend Go, frontend React/PWA, infra Docker).
 - [x] Cadastro de cliente ganhou campo de e-mail no formulário de cadastro rápido (backend já suportava desde o MVP)
 - [x] Máscara de celular `(DDD) 9XXXX-XXXX` em todo campo de telefone (login, recuperação, cadastro rápido de cliente); convertido para E.164 (`+55...`) antes de qualquer chamada à API, formato que casa com o que o Zenvia precisa para enviar SMS/WhatsApp de verdade
 - [x] Validação explícita de e-mail (JS, não só `type="email"` do navegador) no cadastro de barbearia e no cadastro rápido de cliente — mesmo raciocínio do bug de senha curta: validação só nativa pode não aparecer em navegador/WebView mobile
+- [x] Reportado: gestor de barbearia nova (self-service) não tinha nenhuma forma de cadastrar profissionais/serviços pela UI (só existia via API) — aba Config ganhou seções "Serviços" e "Profissionais" com lista + formulário de cadastro
+- [x] Reportado: clicar no avatar deslogava na hora, sem confirmação nem tela nenhuma — agora abre uma tela de Perfil (papel, e-mail/celular, status) com um botão "Sair" explícito; corrigido em `AgendaApp` e também no `AdminPanel` do superadmin (mesmo bug, mesmo padrão)
+- [ ] **Lacuna maior encontrada durante o fix acima, ainda não resolvida**: cadastrar um profissional pela nova tela (nome + telefone) só cria a entrada de catálogo — não existe nenhum jeito de dar login pra essa pessoa. Cliente tem o fluxo de celular+SMS (`grantCustomerAccess`); profissional não tem equivalente nenhum. Precisa de: campo de e-mail no cadastro de profissional + um fluxo de convite (ex.: profissional entra com Google/Facebook usando o mesmo e-mail que o gestor cadastrou, e o backend liga a conta ao `professional_id` automaticamente — hoje `findOrCreateSocialUser` só faz esse match contra `users`, não contra `professionals` sem conta ainda)
 
 ## 5. Evolução mobile / PWA → produto instalável completo
 
