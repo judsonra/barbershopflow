@@ -77,8 +77,60 @@ type Professional struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Phone     string    `json:"phone,omitempty"`
+	Email     string    `json:"email,omitempty"`
+	CPF       string    `json:"cpf,omitempty"`
 	Active    bool      `json:"active"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// ValidCPF checks the standard Brazilian CPF check-digit algorithm. value
+// may contain formatting (dots/dash) — only digits are considered.
+// Sequences of 11 identical digits (e.g. "000.000.000-00") pass the
+// checksum math but are never real CPFs, so they're rejected explicitly.
+func ValidCPF(value string) bool {
+	digits := make([]int, 0, 11)
+	for _, r := range value {
+		if r >= '0' && r <= '9' {
+			digits = append(digits, int(r-'0'))
+		}
+	}
+	if len(digits) != 11 {
+		return false
+	}
+	allSame := true
+	for _, d := range digits {
+		if d != digits[0] {
+			allSame = false
+			break
+		}
+	}
+	if allSame {
+		return false
+	}
+	checkDigit := func(length int) int {
+		sum := 0
+		for i := 0; i < length; i++ {
+			sum += digits[i] * (length + 1 - i)
+		}
+		remainder := (sum * 10) % 11
+		if remainder == 10 {
+			remainder = 0
+		}
+		return remainder
+	}
+	return checkDigit(9) == digits[9] && checkDigit(10) == digits[10]
+}
+
+// DigitsOnly strips everything but 0-9, used to normalize CPF (and other
+// masked numeric fields) before storage/comparison.
+func DigitsOnly(value string) string {
+	digits := make([]byte, 0, len(value))
+	for _, r := range value {
+		if r >= '0' && r <= '9' {
+			digits = append(digits, byte(r))
+		}
+	}
+	return string(digits)
 }
 
 // ScheduleEntry is one weekday's working window for a professional, in

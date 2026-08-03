@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './api'
 import { downloadICS, googleCalendarUrl } from './calendar'
-import { isValidEmail, maskPhone, toE164BR } from './validation'
+import { isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
 import type { Appointment, Customer, Professional, Service, Tenant, TimeOff, User } from './types'
 
 function errorMessage(err: unknown) {
@@ -371,13 +371,17 @@ function ServicesManager({ services, onCreated }: { services: Service[]; onCreat
 
 function ProfessionalsManager({ professionals, onCreated }: { professionals: Professional[]; onCreated: (professional: Professional) => void }) {
   const [name, setName] = useState(''); const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState(''); const [cpf, setCpf] = useState('')
   const [saving, setSaving] = useState(false); const [error, setError] = useState('')
 
   async function submit(event: FormEvent) {
-    event.preventDefault(); setSaving(true); setError('')
+    event.preventDefault(); setError('')
+    if (email.trim() && !isValidEmail(email.trim())) { setError('Informe um e-mail válido ou deixe em branco.'); return }
+    if (cpf.trim() && !isValidCPF(cpf)) { setError('CPF inválido.'); return }
+    setSaving(true)
     try {
-      onCreated(await api.createProfessional({ name, phone: toE164BR(phone) }))
-      setName(''); setPhone('')
+      onCreated(await api.createProfessional({ name, phone: toE164BR(phone), email, cpf: cpf.replace(/\D/g, '') }))
+      setName(''); setPhone(''); setEmail(''); setCpf('')
     }
     catch (err) { setError(errorMessage(err)) }
     finally { setSaving(false) }
@@ -386,11 +390,13 @@ function ProfessionalsManager({ professionals, onCreated }: { professionals: Pro
   return <section className="form-page"><h2>Profissionais</h2>
     {error && <div className="alert">{error}</div>}
     {professionals.length === 0 ? <p>Nenhum profissional cadastrado.</p> : <ul className="tenant-list">
-      {professionals.map(p => <li key={p.id}><div><b>{p.name}</b>{!p.active && <small> · inativo</small>}</div></li>)}
+      {professionals.map(p => <li key={p.id}><div><b>{p.name}</b>{!p.active && <small> · inativo</small>}{(p.email || p.phone) && <small> · {[p.email, p.phone].filter(Boolean).join(' · ')}</small>}</div></li>)}
     </ul>}
     <form onSubmit={submit} className="quick">
       <input placeholder="Nome" required value={name} onChange={e => setName(e.target.value)} />
       <input type="tel" placeholder="(11) 99999-0000 (opcional)" value={phone} onChange={e => setPhone(maskPhone(e.target.value))} maxLength={16} />
+      <input type="email" placeholder="E-mail (opcional)" value={email} onChange={e => setEmail(e.target.value)} />
+      <input placeholder="CPF (opcional)" value={cpf} onChange={e => setCpf(maskCPF(e.target.value))} maxLength={14} />
       <button disabled={saving}>{saving ? 'Adicionando…' : 'Adicionar profissional'}</button>
     </form>
   </section>

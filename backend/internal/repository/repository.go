@@ -49,7 +49,7 @@ func (r *Repository) CreateService(ctx context.Context, tenantID string, item do
 }
 
 func (r *Repository) ListProfessionals(ctx context.Context, tenantID string) ([]domain.Professional, error) {
-	rows, err := r.db.Query(ctx, `SELECT id, name, phone, active, created_at FROM professionals WHERE tenant_id=$1 ORDER BY name`, tenantID)
+	rows, err := r.db.Query(ctx, `SELECT id, name, phone, email, cpf, active, created_at FROM professionals WHERE tenant_id=$1 ORDER BY name`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func (r *Repository) ListProfessionals(ctx context.Context, tenantID string) ([]
 	items := []domain.Professional{}
 	for rows.Next() {
 		var item domain.Professional
-		if err := rows.Scan(&item.ID, &item.Name, &item.Phone, &item.Active, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Phone, &item.Email, &item.CPF, &item.Active, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -66,8 +66,11 @@ func (r *Repository) ListProfessionals(ctx context.Context, tenantID string) ([]
 }
 
 func (r *Repository) CreateProfessional(ctx context.Context, tenantID string, item domain.Professional) (domain.Professional, error) {
-	err := r.db.QueryRow(ctx, `INSERT INTO professionals(tenant_id, name, phone) VALUES($1,$2,$3) RETURNING id, active, created_at`,
-		tenantID, item.Name, item.Phone).Scan(&item.ID, &item.Active, &item.CreatedAt)
+	err := r.db.QueryRow(ctx, `INSERT INTO professionals(tenant_id, name, phone, email, cpf) VALUES($1,$2,$3,$4,$5) RETURNING id, active, created_at`,
+		tenantID, item.Name, item.Phone, item.Email, item.CPF).Scan(&item.ID, &item.Active, &item.CreatedAt)
+	if _, ok := isUniqueViolation(err); ok {
+		return item, domain.ErrConflict
+	}
 	return item, err
 }
 

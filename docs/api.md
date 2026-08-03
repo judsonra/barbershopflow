@@ -159,6 +159,13 @@ problema em caso de remoção manual de dados.
   [regras-de-negocio.md](regras-de-negocio.md)) — só quem confirma
   manualmente é que muda.
 
+`POST /professionals` aceita `{"name","phone","email","cpf"}` — só `name`
+é obrigatório. `email` e `cpf` são únicos por barbearia quando informados
+(`409 conflict` em caso de repetição) e validados no servidor: e-mail por
+formato, CPF pelos dígitos verificadores (`400 validation_error` se
+inválido). CPF pode ser enviado formatado (`111.444.777-35`) ou só dígitos —
+o servidor normaliza antes de salvar.
+
 ## Jornada de trabalho e bloqueios
 
 `PUT /professionals/{id}/schedule` substitui a jornada semanal inteira

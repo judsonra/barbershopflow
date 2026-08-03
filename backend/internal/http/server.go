@@ -116,6 +116,7 @@ func New(store Store, cfg Config) http.Handler {
 }
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+var emailPattern = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 
 // createTenant is the self-service onboarding flow: a new barbershop signs
 // itself up, no invite or manual provisioning needed. Creates the tenant
@@ -642,8 +643,18 @@ func (s *server) createProfessional(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item.Name = strings.TrimSpace(item.Name)
+	item.Email = strings.TrimSpace(item.Email)
+	item.CPF = domain.DigitsOnly(item.CPF)
 	if item.Name == "" {
 		writeError(w, 400, "validation_error", "nome é obrigatório")
+		return
+	}
+	if item.Email != "" && !emailPattern.MatchString(item.Email) {
+		writeError(w, 400, "validation_error", "e-mail inválido")
+		return
+	}
+	if item.CPF != "" && !domain.ValidCPF(item.CPF) {
+		writeError(w, 400, "validation_error", "CPF inválido")
 		return
 	}
 	claims, _ := claimsFromContext(r)
@@ -865,7 +876,7 @@ func handleError(w http.ResponseWriter, err error) {
 	case errors.Is(err, domain.ErrForbidden):
 		writeError(w, 403, "forbidden", err.Error())
 	case errors.Is(err, domain.ErrConflict):
-		writeError(w, 409, "conflict", "barbearia ou e-mail já cadastrados")
+		writeError(w, 409, "conflict", "já existe um cadastro com esse identificador (e-mail, CPF, slug ou telefone)")
 	case errors.Is(err, domain.ErrOutsideWorkingHours):
 		writeError(w, 409, "outside_working_hours", "horário fora da jornada de trabalho do profissional")
 	case errors.Is(err, domain.ErrTimeBlocked):

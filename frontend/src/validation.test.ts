@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isValidEmail, maskPhone, toE164BR } from './validation'
+import { isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
 
 describe('maskPhone', () => {
   it('formats progressively as digits are typed', () => {
@@ -29,6 +29,34 @@ describe('toE164BR', () => {
   it('returns an empty string when there are no digits', () => {
     expect(toE164BR('')).toBe('')
     expect(toE164BR('()')).toBe('')
+  })
+})
+
+describe('maskCPF', () => {
+  it('formats progressively as digits are typed', () => {
+    expect(maskCPF('111')).toBe('111')
+    expect(maskCPF('111444')).toBe('111.444')
+    expect(maskCPF('111444777')).toBe('111.444.777')
+    expect(maskCPF('11144477735')).toBe('111.444.777-35')
+  })
+
+  it('strips non-digit characters and caps at 11 digits', () => {
+    expect(maskCPF('111.444.777-35')).toBe('111.444.777-35')
+    expect(maskCPF('11144477735999')).toBe('111.444.777-35')
+  })
+})
+
+describe('isValidCPF', () => {
+  it('accepts a valid CPF, formatted or not', () => {
+    expect(isValidCPF('111.444.777-35')).toBe(true)
+    expect(isValidCPF('11144477735')).toBe(true)
+  })
+
+  it('rejects wrong check digits, repeated digits, and malformed input', () => {
+    expect(isValidCPF('111.444.777-36')).toBe(false)
+    expect(isValidCPF('111.111.111-11')).toBe(false)
+    expect(isValidCPF('123456789')).toBe(false)
+    expect(isValidCPF('')).toBe(false)
   })
 })
 
