@@ -102,7 +102,13 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
   }
 
   async function submitSignup(event: FormEvent) {
-    event.preventDefault(); setLoading(true); setError('')
+    event.preventDefault(); setError('')
+    // Some mobile browsers (notably installed PWAs) silently swallow the
+    // native minLength validation bubble instead of showing it — the form
+    // just sits there with no feedback. Check explicitly so there's always
+    // a visible message.
+    if (signup.password.length < 8) { setError('A senha deve ter pelo menos 8 caracteres.'); return }
+    setLoading(true)
     try {
       onLogin(await api.createTenant({
         tenant_name: signup.tenantName, slug: slugify(signup.tenantName),
