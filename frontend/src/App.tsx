@@ -305,7 +305,7 @@ function Login({ onLogin, initialError, initialChoice }: {
 function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   const isClient = user.role === 'client'
   const [tab, setTab] = useState<'agenda' | 'new' | 'config' | 'hours' | 'profile'>('agenda')
-  const [configView, setConfigView] = useState<'menu' | 'agenda' | 'services' | 'professionals' | 'clients'>('menu')
+  const [configView, setConfigView] = useState<'menu' | 'agenda' | 'tenant' | 'services' | 'professionals' | 'clients'>('menu')
   const [offset, setOffset] = useState(0)
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [services, setServices] = useState<Service[]>([])
@@ -397,6 +397,7 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
       {tab === 'config' && tenant && <>
         {configView === 'menu' && <ConfigMenu onSelect={setConfigView} />}
         {configView === 'agenda' && <TenantConfig tenant={tenant} onSaved={t => setTenant(t)} onBack={() => setConfigView('menu')} />}
+        {configView === 'tenant' && <TenantAccount tenant={tenant} onSaved={t => setTenant(t)} onBack={() => setConfigView('menu')} />}
         {configView === 'services' && <ServicesManager services={services} onCreated={s => setServices(v => [...v, s])}
           onUpdated={s => setServices(v => v.map(x => x.id === s.id ? s : x))} onBack={() => setConfigView('menu')} />}
         {configView === 'professionals' && <ProfessionalsManager professionals={professionals} onCreated={p => setProfessionals(v => [...v, p])}
@@ -423,9 +424,10 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   </div>
 }
 
-function ConfigMenu({ onSelect }: { onSelect: (view: 'agenda' | 'services' | 'professionals' | 'clients') => void }) {
+function ConfigMenu({ onSelect }: { onSelect: (view: 'agenda' | 'tenant' | 'services' | 'professionals' | 'clients') => void }) {
   return <section className="form-page"><span className="eyebrow">CONFIGURAÇÕES</span><h2>Config</h2>
     <ul className="tenant-list">
+      <li role="button" tabIndex={0} onClick={() => onSelect('tenant')}><div><b>Barbearia</b><small>Nome, slug e dados da conta</small></div></li>
       <li role="button" tabIndex={0} onClick={() => onSelect('agenda')}><div><b>Agenda</b><small>Autoagendamento e confirmação</small></div></li>
       <li role="button" tabIndex={0} onClick={() => onSelect('services')}><div><b>Serviços</b><small>Cadastro de serviços</small></div></li>
       <li role="button" tabIndex={0} onClick={() => onSelect('professionals')}><div><b>Profissionais</b><small>Cadastro de profissionais</small></div></li>
@@ -442,7 +444,7 @@ function TenantConfig({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (t
 
   async function save() {
     setSaving(true); setError('')
-    try { onSaved(await api.updateTenant({ self_scheduling_enabled: selfScheduling, auto_confirm_appointments: autoConfirm })) }
+    try { onSaved(await api.updateTenant({ name: tenant.name, slug: tenant.slug, self_scheduling_enabled: selfScheduling, auto_confirm_appointments: autoConfirm })) }
     catch (err) { setError(errorMessage(err)) }
     finally { setSaving(false) }
   }
@@ -457,6 +459,68 @@ function TenantConfig({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (t
         : 'Só a equipe cria agendamentos.'}</p>
       <button className="primary" disabled={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
     </form>
+    <button type="button" className="link-button" onClick={onBack}>Voltar</button>
+  </section>
+}
+
+// Editing name reuses the same real-time availability check as the
+// barbershop signup form, but skips it while the typed name still matches
+// the tenant's own current name — otherwise submitting unchanged would
+// falsely show "já em uso" against itself.
+function TenantAccount({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (tenant: Tenant) => void; onBack: () => void }) {
+  const [name, setName] = useState(tenant.name)
+  const [slug, setSlug] = useState(tenant.slug)
+  const [nameStatus, setNameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [info, setInfo] = useState('')
+
+  useEffect(() => {
+    const trimmed = name.trim()
+    if (!trimmed || trimmed.toLowerCase() === tenant.name.toLowerCase()) { setNameStatus('idle'); return }
+    setNameStatus('checking')
+    const timeout = setTimeout(async () => {
+      try { setNameStatus((await api.checkTenantName(trimmed)).available ? 'available' : 'taken') }
+      catch { setNameStatus('idle') }
+    }, 400)
+    return () => clearTimeout(timeout)
+  }, [name, tenant.name])
+
+  async function save(event: FormEvent) {
+    event.preventDefault(); setError(''); setInfo('')
+    if (nameStatus === 'taken') { setError('Nome já em uso.'); return }
+    setSaving(true)
+    try {
+      const updated = await api.updateTenant({
+        name: name.trim(), slug: slug.trim().toLowerCase(),
+        self_scheduling_enabled: tenant.self_scheduling_enabled, auto_confirm_appointments: tenant.auto_confirm_appointments
+      })
+      onSaved(updated)
+      setInfo('Dados salvos.')
+    }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setSaving(false) }
+  }
+
+  return <section className="form-page"><span className="eyebrow">CONFIGURAÇÕES</span><h2>Barbearia</h2>
+    {error && <div className="alert" role="alert">{error}</div>}
+    {info && <p>{info}</p>}
+    <form onSubmit={save}>
+      <label>Nome da barbearia
+        <span className="field-status">
+          <input required value={name} onChange={e => setName(e.target.value)} />
+          {nameStatus === 'available' && <span className="field-icon ok" aria-label="Nome disponível">✓</span>}
+          {nameStatus === 'taken' && <span className="field-icon bad" aria-label="Nome já em uso">✗</span>}
+        </span>
+        {nameStatus === 'taken' && <small className="field-error">Nome já em uso</small>}
+      </label>
+      <label>Slug (usado em links de cadastro)<input required value={slug} onChange={e => setSlug(e.target.value.toLowerCase())} /></label>
+      <button className="primary" disabled={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
+    </form>
+    <div className="profile-info">
+      <div><small>Status</small><b>{tenant.active ? 'Ativa' : 'Inativa'}</b></div>
+      <div><small>Criada em</small><b>{new Date(tenant.created_at).toLocaleDateString('pt-BR')}</b></div>
+    </div>
     <button type="button" className="link-button" onClick={onBack}>Voltar</button>
   </section>
 }

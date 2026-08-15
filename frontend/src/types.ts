@@ -5,7 +5,7 @@ export type User = {
 export type MembershipOption = { membership_id: string; tenant_id: string; tenant_name: string; tenant_slug: string; role: string }
 export type Tenant = {
   id: string; name: string; slug: string
-  self_scheduling_enabled: boolean; auto_confirm_appointments: boolean; active: boolean
+  self_scheduling_enabled: boolean; auto_confirm_appointments: boolean; active: boolean; created_at: string
 }
 export type Service = { id: string; name: string; duration_minutes: number; price_cents: number; active: boolean }
 export type Professional = { id: string; name: string; phone?: string; email?: string; cpf?: string; active: boolean }
