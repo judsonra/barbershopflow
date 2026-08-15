@@ -32,4 +32,36 @@ describe('api client', () => {
     await expect(api.services()).resolves.toEqual([])
     expect(fetch).toHaveBeenCalledWith('/api/v1/services', expect.any(Object))
   })
+
+  it('sends a PATCH to update a service', async () => {
+    const body = { id: '1', name: 'Corte', duration_minutes: 30, price_cents: 5000, active: false }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 })))
+
+    await expect(api.updateService('1', { name: 'Corte', duration_minutes: 30, price_cents: 5000, active: false })).resolves.toEqual(body)
+    expect(fetch).toHaveBeenCalledWith('/api/v1/services/1', expect.objectContaining({ method: 'PATCH' }))
+  })
+
+  it('sends a PATCH to update a professional', async () => {
+    const body = { id: '1', name: 'Rafael', active: false }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 })))
+
+    await expect(api.updateProfessional('1', { name: 'Rafael', active: false })).resolves.toEqual(body)
+    expect(fetch).toHaveBeenCalledWith('/api/v1/professionals/1', expect.objectContaining({ method: 'PATCH' }))
+  })
+
+  it('sends a PATCH to update a customer', async () => {
+    const body = { id: '1', name: 'Maria', active: false }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 })))
+
+    await expect(api.updateCustomer('1', { name: 'Maria', active: false })).resolves.toEqual(body)
+    expect(fetch).toHaveBeenCalledWith('/api/v1/customers/1', expect.objectContaining({ method: 'PATCH' }))
+  })
+
+  it('searches customers across tenants with the query URL-encoded', async () => {
+    const body = [{ id: '1', name: 'Maria', active: true, tenant_id: 't1', tenant_name: 'Barbearia A', tenant_slug: 'barbearia-a' }]
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 })))
+
+    await expect(api.searchCustomersAdmin('(11) 9')).resolves.toEqual(body)
+    expect(fetch).toHaveBeenCalledWith('/api/v1/admin/customers?q=(11)%209', expect.any(Object))
+  })
 })

@@ -16,12 +16,14 @@ Há três formas de autenticar, dependendo de quem tem e-mail e quem não tem:
 2. **Login social (Google/Facebook)** — `GET /auth/google/start` ou
    `GET /auth/facebook/start` redireciona ao provedor; o callback devolve o
    navegador para `FRONTEND_URL` com `#access_token=...&refresh_token=...`.
-   Resolve conta por e-mail: se já existir um usuário (staff ou cliente) com
-   aquele e-mail, apenas vincula a conta social a ele — isso também serve
-   como recuperação de acesso de staff sem precisar de "esqueci minha senha".
-   Se não existir, autocadastra um cliente novo. Responde `501
-   oauth_not_configured` se as credenciais do provedor não estiverem nas
-   variáveis de ambiente.
+   Resolve conta por e-mail: se já existir uma identidade (staff ou cliente)
+   com aquele e-mail, vincula a conta social a ela — isso também serve como
+   recuperação de acesso de staff sem precisar de "esqueci minha senha". Se
+   a identidade existe mas ainda não tem vínculo na barbearia do
+   `?tenant=<slug>` da URL (ver "Multi-tenant" abaixo), cria o vínculo novo
+   ali em vez de logar na conta de outra barbearia. Se a identidade não
+   existe, autocadastra um cliente novo. Responde `501 oauth_not_configured`
+   se as credenciais do provedor não estiverem nas variáveis de ambiente.
 3. **Celular + senha (cliente ou profissional sem e-mail)** — `POST
    /auth/login` com `{"phone","password"}`. Rate limited: 3 tentativas
    erradas bloqueiam a conta (`423 account_locked`); o desbloqueio só
@@ -33,20 +35,48 @@ Há três formas de autenticar, dependendo de quem tem e-mail e quem não tem:
    senha inicial. Profissional autenticado por celular só enxerga a própria
    agenda (ver `GET /appointments` abaixo).
 
+Identidade e vínculo são coisas separadas: a mesma pessoa (mesmo e-mail,
+celular ou login social) pode ter um vínculo (`membership`) em mais de uma
+barbearia, com **uma senha só** — resetar em `POST /auth/recover` vale para
+todas. Por isso `POST /auth/login` (nas formas 1 e 3) e o callback OAuth da
+forma 2 têm duas respostas possíveis:
+
+- **Um vínculo ativo** (caso comum, sem mudança de comportamento): resposta
+  de token normal — ver "Resposta" abaixo.
+- **Mais de um vínculo ativo**: em vez de tokens, `200` com
+  `{"preauth_token": "...", "memberships": [{"membership_id", "tenant_id",
+  "tenant_name", "tenant_slug", "role"}, ...]}`. O cliente escolhe uma
+  barbearia e chama `POST /auth/select-membership` com
+  `{"preauth_token", "membership_id"}` para completar o login (mesma
+  resposta de token normal). `preauth_token` expira em 5 minutos e só serve
+  para essa troca — não autentica nenhum outro endpoint. No callback OAuth
+  (forma 2), o caso ambíguo redireciona com
+  `#preauth_token=...&needs_selection=1` em vez de `access_token`.
+
+Concessão de acesso (`POST /customers/{id}/credentials` e
+`POST /professionals/{id}/credentials`) segue a mesma lógica: se o celular
+informado já é uma identidade conhecida (staff/cliente de outra barbearia),
+a chamada só cria o vínculo novo — **não** gera nem envia senha nova, pra
+não invalidar a sessão que a pessoa já tinha em outro lugar. Só gera/envia
+senha quando a identidade é realmente nova.
+
 | Método | Rota | Descrição | Autenticação |
 |---|---|---|---|
 | GET | `/tenants/availability?name=` | Checa se o nome da barbearia está disponível | pública |
 | POST | `/tenants` | Cria uma barbearia nova + gestor inicial; já retorna tokens (auto-login) | pública |
 | POST | `/auth/login` | Login com e-mail+senha ou celular+senha | pública |
 | POST | `/auth/refresh` | Troca um refresh token válido por um novo access token | pública |
-| POST | `/auth/recover` | Envia senha nova por SMS/WhatsApp a um celular cadastrado | pública |
+| POST | `/auth/recover` | Envia senha nova por SMS/WhatsApp a um celular cadastrado (vale em todas as barbearias da identidade) | pública |
+| POST | `/auth/select-membership` | Completa o login quando a identidade tem mais de um vínculo ativo | pública |
 | GET | `/auth/google/start`, `/auth/facebook/start` | Redireciona ao provedor OAuth | pública |
 | GET | `/auth/google/callback`, `/auth/facebook/callback` | Callback OAuth; redireciona ao frontend com tokens | pública |
 | GET | `/auth/me` | Retorna o usuário autenticado | qualquer papel |
 | GET | `/services` | Lista serviços | qualquer papel |
 | POST | `/services` | Cria serviço | `manager` |
+| PATCH | `/services/{id}` | Atualiza nome/duração/preço/ativo (usado também para desativar/reativar) | `manager` |
 | GET | `/professionals` | Lista profissionais | qualquer papel |
 | POST | `/professionals` | Cria profissional | `manager` |
+| PATCH | `/professionals/{id}` | Atualiza dados/ativo do profissional (usado também para desativar/reativar) | `manager` |
 | GET | `/professionals/{id}/schedule` | Jornada semanal do profissional | qualquer papel |
 | PUT | `/professionals/{id}/schedule` | Substitui a jornada semanal inteira | `manager` ou o próprio `professional` |
 | GET | `/professionals/{id}/time-off?from=&to=` | Lista bloqueios (ausência/folga/viagem) no período | qualquer papel |
@@ -55,11 +85,13 @@ Há três formas de autenticar, dependendo de quem tem e-mail e quem não tem:
 | POST | `/professionals/{id}/credentials` | Concede/renova acesso por celular a um profissional | `manager` |
 | GET | `/customers` | Lista clientes | `manager` ou `professional` |
 | POST | `/customers` | Cria cliente | `manager` ou `professional` |
+| PATCH | `/customers/{id}` | Atualiza dados/ativo do cliente (usado também para desativar/reativar) | `manager` ou `professional` |
 | POST | `/customers/{id}/credentials` | Concede/renova acesso por celular a um cliente | `manager` ou `professional` |
 | GET | `/tenant` | Configurações da própria barbearia | qualquer papel |
 | PATCH | `/tenant` | Liga/desliga autoagendamento e auto-confirmação | `manager` |
 | GET | `/admin/tenants` | Lista todas as barbearias da plataforma | `superadmin` |
 | POST | `/admin/tenants/{id}/impersonate` | Vira o gestor daquela barbearia (novo access/refresh token) | `superadmin` |
+| GET | `/admin/customers?q=` | Busca clientes por nome/celular/e-mail em todas as barbearias | `superadmin` |
 | GET | `/appointments?from=&to=` | Lista agenda no período (`client` só vê os próprios; `professional` só vê os da própria agenda) | qualquer papel |
 | POST | `/appointments` | Cria agendamento; `client` só se autoagendamento estiver ligado, ver "Autoagendamento" | qualquer papel |
 | PATCH | `/appointments/{id}/status` | Altera estado | `manager`/`professional` (profissional só no próprio agendamento); `client` não pode |
@@ -119,10 +151,14 @@ barbearia se cadastrar: passe `?tenant=<slug>` em `/auth/google/start` ou
 `/auth/facebook/start`.
 
 Identificadores de login (e-mail, celular, ids do Google/Facebook) são
-globalmente únicos entre barbearias — uma pessoa pertence a uma única
-barbearia por vez. O isolamento que importa é o dos dados de negócio
-(serviços, profissionais, clientes, agendamentos), sempre filtrados pelo
-`tenant_id` do token.
+globalmente únicos entre barbearias — cada um identifica uma **identidade**
+única (uma pessoa, uma senha). Uma identidade pode ter um **vínculo**
+(`membership`) em mais de uma barbearia ao mesmo tempo, cada um com seu
+próprio papel (`role`) — ver "Autenticação" acima para o fluxo de login
+quando há mais de um vínculo. O isolamento que importa é o dos dados de
+negócio (serviços, profissionais, clientes, agendamentos), sempre filtrados
+pelo `tenant_id` do token, que identifica o vínculo escolhido, não a
+identidade.
 
 ### Acesso administrativo (superadmin)
 
@@ -140,6 +176,17 @@ impersonada — `impersonate` responde `404`. Toda barbearia criada via
 `POST /tenants` já vem com um gestor por construção, então isso só seria um
 problema em caso de remoção manual de dados.
 
+A única exceção deliberada ao isolamento por tenant é `GET
+/admin/customers?q=`: busca clientes por nome, celular ou e-mail (`ILIKE`,
+case-insensitive) em **todas** as barbearias de uma vez, retornando também
+`tenant_id`/`tenant_name`/`tenant_slug` de cada resultado — serve pra achar
+rápido em qual barbearia um cliente específico está cadastrado, sem
+precisar impersonar barbearia por barbearia. `q` vazio devolve lista vazia
+em vez de despejar a base inteira; resultado limitado a 50 linhas (é um
+atalho de busca, não um relatório). Não devolve dado de negócio (serviços,
+profissionais, agendamentos) de nenhuma barbearia — pra isso, ainda é
+preciso impersonar.
+
 ## Autoagendamento
 
 `GET /tenant` retorna as configurações da barbearia:
@@ -147,6 +194,23 @@ problema em caso de remoção manual de dados.
 ```json
 { "id": "uuid", "name": "...", "slug": "...", "self_scheduling_enabled": false, "auto_confirm_appointments": false, "active": true }
 ```
+
+`PATCH /services/{id}` (só `manager`) substitui o serviço inteiro — não há
+merge parcial, o corpo sempre traz `name`, `duration_minutes`, `price_cents` e
+`active`. "Excluir" um serviço é um soft-delete: manda `active: false` em vez
+de remover a linha, porque `appointments.service_id` é uma FK `NOT NULL` sem
+`ON DELETE CASCADE` e um DELETE físico falharia assim que o serviço tivesse
+qualquer agendamento no histórico.
+
+`PATCH /professionals/{id}` (só `manager`) segue o mesmo contrato: substitui
+o profissional inteiro (`name`, `phone`, `email`, `cpf`, `active`), sem merge
+parcial, e "Excluir" também é soft-delete via `active: false` — mesma razão
+de FK, agora em `appointments.professional_id`.
+
+`PATCH /customers/{id}` (`manager` ou `professional`) segue o mesmo contrato:
+substitui o cliente inteiro (`name`, `phone`, `email`, `active`), sem merge
+parcial, e "Excluir" também é soft-delete via `active: false` — mesma razão
+de FK, agora em `appointments.customer_id`.
 
 `PATCH /tenant` (só `manager`) liga/desliga os dois parâmetros independentes:
 

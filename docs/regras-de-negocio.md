@@ -47,12 +47,19 @@ acesso a redes confiáveis.
    agendamentos de uma barbearia nunca aparecem para outra.
 2. Onboarding é self-service — `POST /api/v1/tenants` cria a barbearia e o
    gestor inicial numa única operação, sem precisar de provisionamento manual.
-3. E-mail, celular e ids de login social (Google/Facebook) são únicos
-   globalmente, não por barbearia — uma pessoa (staff ou cliente) pertence a
-   uma única barbearia por vez. Isso é o que permite logar sem escolher a
-   barbearia primeiro; a única exceção é o autocadastro social de um cliente
-   totalmente novo, que precisa do `?tenant=<slug>` da barbearia (ver
-   [docs/api.md](api.md)).
+3. E-mail, celular e ids de login social (Google/Facebook) identificam uma
+   **identidade** (a pessoa, com sua senha), única globalmente — não por
+   barbearia. Uma identidade pode ter um **vínculo** (`membership`) em mais
+   de uma barbearia ao mesmo tempo (ex: cliente atendido em duas
+   barbearias), cada vínculo com seu próprio papel; a senha é uma só e
+   resetar em qualquer lugar vale para todos os vínculos. Login com um
+   único vínculo ativo entra direto, sem escolher barbearia, como sempre
+   foi; com mais de um vínculo ativo, a API responde com a lista para
+   escolher (`POST /auth/select-membership`, ver [docs/api.md](api.md)). A
+   única exceção que precisa saber a barbearia de antemão é o autocadastro
+   social de um cliente totalmente novo (identidade nova ou identidade
+   existente sem vínculo ainda naquela barbearia), que precisa do
+   `?tenant=<slug>` da barbearia (ver [docs/api.md](api.md)).
 
 ### Serviços
 

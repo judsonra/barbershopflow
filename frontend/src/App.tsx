@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './api'
 import { downloadICS, googleCalendarUrl } from './calendar'
 import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
-import type { Appointment, Customer, Professional, Service, Tenant, TimeOff, User } from './types'
+import type { AdminCustomerMatch, Appointment, Customer, MembershipOption, Professional, Service, Tenant, TimeOff, User } from './types'
 
 function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : 'Erro inesperado'
@@ -23,17 +23,19 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null)
   const [checkingSession, setCheckingSession] = useState(true)
   const [oauthError, setOauthError] = useState('')
+  const [initialChoice, setInitialChoice] = useState<{ preauthToken: string; memberships: MembershipOption[] } | null>(null)
 
   useEffect(() => {
     api.onSessionExpired(() => setUser(null))
-    const { error } = api.consumeOAuthRedirect()
+    const { error, choice } = api.consumeOAuthRedirect()
     if (error) setOauthError(error)
+    if (choice) setInitialChoice(choice)
     if (!api.isAuthenticated()) { setCheckingSession(false); return }
     api.me().then(setUser).catch(() => api.logout()).finally(() => setCheckingSession(false))
   }, [])
 
   if (checkingSession) return <div className="empty">Carregando…</div>
-  if (!user) return <Login onLogin={setUser} initialError={oauthError} />
+  if (!user) return <Login onLogin={setUser} initialError={oauthError} initialChoice={initialChoice} />
   if (user.role === 'superadmin') return <AdminPanel user={user} onImpersonate={setUser} onLogout={() => { api.logout(); setUser(null) }} />
   return <AgendaApp user={user} onLogout={() => { api.logout(); setUser(null) }} />
 }
@@ -43,10 +45,13 @@ export default function App() {
 // docs/api.md). Logging back out returns to this same login; to switch
 // back to the admin view, log in again with the superadmin account.
 function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersonate: (user: User) => void; onLogout: () => void }) {
-  const [view, setView] = useState<'tenants' | 'profile'>('tenants')
+  const [view, setView] = useState<'tenants' | 'customers' | 'profile'>('tenants')
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [customerQuery, setCustomerQuery] = useState('')
+  const [customerResults, setCustomerResults] = useState<AdminCustomerMatch[]>([])
+  const [searching, setSearching] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -57,6 +62,20 @@ function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersona
 
   useEffect(() => { void load() }, [load])
 
+  // Search-as-you-type, same 400ms debounce as the tenant-name check on
+  // signup — an empty query just clears the results instead of round-tripping.
+  useEffect(() => {
+    const query = customerQuery.trim()
+    if (!query) { setCustomerResults([]); setSearching(false); return }
+    setSearching(true)
+    const timeout = setTimeout(async () => {
+      try { setCustomerResults(await api.searchCustomersAdmin(query)) }
+      catch (err) { setError(errorMessage(err)) }
+      finally { setSearching(false) }
+    }, 400)
+    return () => clearTimeout(timeout)
+  }, [customerQuery])
+
   async function access(tenantId: string) {
     setError('')
     try { onImpersonate(await api.impersonateTenant(tenantId)) }
@@ -65,11 +84,13 @@ function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersona
 
   return <div className="app-shell">
     <header>
-      <div><span className="eyebrow">SUPERADMIN</span><h1>Barbearias</h1></div>
+      <div><span className="eyebrow">SUPERADMIN</span><h1>{view === 'customers' ? 'Clientes' : 'Barbearias'}</h1></div>
       <button className="avatar" title={`${user.name} · Perfil`} onClick={() => setView('profile')}>{user.name.slice(0, 2).toUpperCase()}</button>
     </header>
     <main>
-      {view === 'profile' ? <Profile user={user} onLogout={onLogout} onBack={() => setView('tenants')} /> : <>
+      {view === 'profile' && <Profile user={user} onLogout={onLogout} onBack={() => setView('tenants')} />}
+
+      {view === 'tenants' && <>
         {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
         {loading ? <div className="empty">Carregando…</div> :
           tenants.length === 0 ? <div className="empty"><span>🏠</span><h2>Nenhuma barbearia</h2></div> :
@@ -78,7 +99,25 @@ function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersona
             <button onClick={() => void access(t.id)}>Acessar como gestor</button>
           </li>)}</ul>}
       </>}
+
+      {view === 'customers' && <>
+        {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
+        <label>Buscar por nome, celular ou e-mail
+          <input value={customerQuery} onChange={e => setCustomerQuery(e.target.value)} placeholder="Ex: Maria, (11) 99999-0000…" autoFocus />
+        </label>
+        {searching ? <div className="empty">Buscando…</div> :
+          !customerQuery.trim() ? <div className="empty"><span>🔎</span><p>Digite pra buscar clientes em todas as barbearias.</p></div> :
+          customerResults.length === 0 ? <div className="empty"><span>🔎</span><h2>Nenhum cliente encontrado</h2></div> :
+          <ul className="tenant-list">{customerResults.map(c => <li key={c.id}>
+            <div><b>{c.name}</b><small>{c.tenant_name}{c.phone ? ` · ${c.phone}` : ''}{c.email ? ` · ${c.email}` : ''}{!c.active ? ' · inativo' : ''}</small></div>
+            <button onClick={() => void access(c.tenant_id)}>Acessar como gestor</button>
+          </li>)}</ul>}
+      </>}
     </main>
+    {view !== 'profile' && <nav>
+      <button className={view === 'tenants' ? 'active' : ''} onClick={() => setView('tenants')}><span>🏠</span>Barbearias</button>
+      <button className={view === 'customers' ? 'active' : ''} onClick={() => setView('customers')}><span>🔎</span>Clientes</button>
+    </nav>}
   </div>
 }
 
@@ -99,15 +138,18 @@ function Profile({ user, onLogout, onBack }: { user: User; onLogout: () => void;
   </section>
 }
 
-type LoginMode = 'email' | 'phone' | 'recover' | 'signup'
+type LoginMode = 'email' | 'phone' | 'recover' | 'signup' | 'choose-tenant'
 
 function slugify(value: string) {
   return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
-function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initialError?: string }) {
-  const [mode, setMode] = useState<LoginMode>('email')
+function Login({ onLogin, initialError, initialChoice }: {
+  onLogin: (user: User) => void; initialError?: string
+  initialChoice?: { preauthToken: string; memberships: MembershipOption[] } | null
+}) {
+  const [mode, setMode] = useState<LoginMode>(initialChoice ? 'choose-tenant' : 'email')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
@@ -116,6 +158,7 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
   const [loading, setLoading] = useState(false)
   const [signup, setSignup] = useState({ tenantName: '', managerName: '', email: '', password: '' })
   const [nameStatus, setNameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle')
+  const [choice, setChoice] = useState(initialChoice ?? null)
 
   useEffect(() => {
     const name = signup.tenantName.trim()
@@ -128,9 +171,14 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
     return () => clearTimeout(timeout)
   }, [signup.tenantName])
 
+  function handleLoginResult(result: Awaited<ReturnType<typeof api.login>>) {
+    if (result.kind === 'choice') { setChoice(result); setMode('choose-tenant'); return }
+    onLogin(result.user)
+  }
+
   async function submitEmail(event: FormEvent) {
     event.preventDefault(); setLoading(true); setError('')
-    try { onLogin(await api.login(email, password)) }
+    try { handleLoginResult(await api.login(email, password)) }
     catch (err) { setError(errorMessage(err)) }
     finally { setLoading(false) }
   }
@@ -157,7 +205,7 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
 
   async function submitPhone(event: FormEvent) {
     event.preventDefault(); setLoading(true); setError('')
-    try { onLogin(await api.loginByPhone(toE164BR(phone), password)) }
+    try { handleLoginResult(await api.loginByPhone(toE164BR(phone), password)) }
     catch (err) {
       if (err instanceof ApiError && err.code === 'account_locked') { setMode('recover'); setError('') }
       else setError(errorMessage(err))
@@ -172,6 +220,14 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
     finally { setLoading(false) }
   }
 
+  async function chooseMembership(membershipId: string) {
+    if (!choice) return
+    setLoading(true); setError('')
+    try { onLogin(await api.selectMembership(choice.preauthToken, membershipId)) }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setLoading(false) }
+  }
+
   return <div className="app-shell">
     <header>
       <div><span className="eyebrow">BARBERFLOW</span><h1>Entrar</h1></div>
@@ -179,6 +235,16 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
     <main>
       <section className="form-page">
         {error && <div className="alert" role="alert">{error}</div>}
+
+        {mode === 'choose-tenant' && choice && <>
+          <p>Esse celular/e-mail tem acesso em mais de uma barbearia. Qual delas?</p>
+          <ul className="tenant-list">
+            {choice.memberships.map(m => <li key={m.membership_id} role="button" tabIndex={0} onClick={() => chooseMembership(m.membership_id)}>
+              <div><b>{m.tenant_name}</b><small>{roleLabel[m.role] ?? m.role}</small></div>
+            </li>)}
+          </ul>
+          <button type="button" className="link-button" onClick={() => { setChoice(null); setMode('email'); setError('') }}>Voltar para o login</button>
+        </>}
 
         {mode === 'email' && <>
           <form onSubmit={submitEmail}>
@@ -239,6 +305,7 @@ function Login({ onLogin, initialError }: { onLogin: (user: User) => void; initi
 function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   const isClient = user.role === 'client'
   const [tab, setTab] = useState<'agenda' | 'new' | 'config' | 'hours' | 'profile'>('agenda')
+  const [configView, setConfigView] = useState<'menu' | 'agenda' | 'services' | 'professionals' | 'clients'>('menu')
   const [offset, setOffset] = useState(0)
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [services, setServices] = useState<Service[]>([])
@@ -247,6 +314,9 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [tenant, setTenant] = useState<Tenant | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [filterProfessional, setFilterProfessional] = useState('')
+  const [filterStatus, setFilterStatus] = useState<Appointment['status'] | ''>('')
+  const [filterService, setFilterService] = useState('')
   const bounds = useMemo(() => dayBounds(offset), [offset])
 
   const load = useCallback(async () => {
@@ -269,6 +339,12 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
     catch (err) { setError(errorMessage(err)) }
   }
 
+  const filteredAppointments = useMemo(() => appointments.filter(item =>
+    (!filterProfessional || item.professional_id === filterProfessional) &&
+    (!filterStatus || item.status === filterStatus) &&
+    (!filterService || item.service_id === filterService)
+  ), [appointments, filterProfessional, filterStatus, filterService])
+
   return <div className="app-shell">
     <header>
       <div><span className="eyebrow">BARBERFLOW</span><h1>Sua agenda</h1></div>
@@ -280,14 +356,28 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
       {tab === 'agenda' && <>
         <section className="date-nav">
           <button aria-label="Dia anterior" onClick={() => setOffset(v => v - 1)}>‹</button>
-          <div><b>{offset === 0 ? 'Hoje' : dateTime.format(new Date(bounds.from)).split(' às')[0]}</b><small>{appointments.length} atendimento(s)</small></div>
+          <div><b>{offset === 0 ? 'Hoje' : dateTime.format(new Date(bounds.from)).split(' às')[0]}</b><small>{filteredAppointments.length} atendimento(s)</small></div>
           <button aria-label="Próximo dia" onClick={() => setOffset(v => v + 1)}>›</button>
         </section>
+        {!isClient && <section className="filters">
+          <select aria-label="Filtrar por profissional" value={filterProfessional} onChange={e => setFilterProfessional(e.target.value)}>
+            <option value="">Profissional</option>
+            {professionals.map(p => <option value={p.id} key={p.id}>{p.name}</option>)}
+          </select>
+          <select aria-label="Filtrar por status" value={filterStatus} onChange={e => setFilterStatus(e.target.value as Appointment['status'] | '')}>
+            <option value="">Status</option>
+            {(Object.keys(statusLabel) as Appointment['status'][]).map(s => <option value={s} key={s}>{statusLabel[s]}</option>)}
+          </select>
+          <select aria-label="Filtrar por serviço" value={filterService} onChange={e => setFilterService(e.target.value)}>
+            <option value="">Serviço</option>
+            {services.map(s => <option value={s.id} key={s.id}>{s.name}</option>)}
+          </select>
+        </section>}
         {loading ? <div className="empty">Carregando agenda…</div> :
-          appointments.length === 0 ? <div className="empty"><span>✂</span><h2>Agenda livre</h2>
-            <p>{isClient ? 'Você ainda não tem horário marcado.' : 'Que tal criar o primeiro horário do dia?'}</p>
+          filteredAppointments.length === 0 ? <div className="empty"><span>✂</span><h2>Agenda livre</h2>
+            <p>{appointments.length > 0 ? 'Nenhum compromisso encontrado com esses filtros.' : isClient ? 'Você ainda não tem horário marcado.' : 'Que tal criar o primeiro horário do dia?'}</p>
           </div> :
-          <section className="appointments">{appointments.map(item => <article className={`card ${item.status}`} key={item.id}>
+          <section className="appointments">{filteredAppointments.map(item => <article className={`card ${item.status}`} key={item.id}>
             <time>{new Date(item.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', hour12: false })}</time>
             <div className="card-body">
               <div className="card-title"><h3>{item.customer_name}</h3><span>{statusLabel[item.status]}</span></div>
@@ -305,9 +395,14 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
       {tab === 'new' && <NewAppointment user={user} tenant={tenant} services={services} professionals={professionals} customers={customers}
         onDone={async () => { setTab('agenda'); setOffset(0); await load() }} />}
       {tab === 'config' && tenant && <>
-        <TenantConfig tenant={tenant} onSaved={t => setTenant(t)} />
-        <ServicesManager services={services} onCreated={s => setServices(v => [...v, s])} />
-        <ProfessionalsManager professionals={professionals} onCreated={p => setProfessionals(v => [...v, p])} />
+        {configView === 'menu' && <ConfigMenu onSelect={setConfigView} />}
+        {configView === 'agenda' && <TenantConfig tenant={tenant} onSaved={t => setTenant(t)} onBack={() => setConfigView('menu')} />}
+        {configView === 'services' && <ServicesManager services={services} onCreated={s => setServices(v => [...v, s])}
+          onUpdated={s => setServices(v => v.map(x => x.id === s.id ? s : x))} onBack={() => setConfigView('menu')} />}
+        {configView === 'professionals' && <ProfessionalsManager professionals={professionals} onCreated={p => setProfessionals(v => [...v, p])}
+          onUpdated={p => setProfessionals(v => v.map(x => x.id === p.id ? p : x))} onBack={() => setConfigView('menu')} />}
+        {configView === 'clients' && <ClientsManager customers={customers} onCreated={c => setCustomers(v => [...v, c])}
+          onUpdated={c => setCustomers(v => v.map(x => x.id === c.id ? c : x))} onBack={() => setConfigView('menu')} />}
       </>}
       {tab === 'hours' && <ScheduleManager user={user} professionals={professionals} />}
       {tab === 'profile' && <Profile user={user} onLogout={onLogout} onBack={() => setTab('agenda')} />}
@@ -323,12 +418,23 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
       {!isClient &&
         <button className={tab === 'hours' ? 'active' : ''} onClick={() => setTab('hours')}><span>🕘</span>Horários</button>}
       {user.role === 'manager' &&
-        <button className={tab === 'config' ? 'active' : ''} onClick={() => setTab('config')}><span>⚙</span>Config</button>}
+        <button className={tab === 'config' ? 'active' : ''} onClick={() => { setTab('config'); setConfigView('menu') }}><span>⚙</span>Config</button>}
     </nav>
   </div>
 }
 
-function TenantConfig({ tenant, onSaved }: { tenant: Tenant; onSaved: (tenant: Tenant) => void }) {
+function ConfigMenu({ onSelect }: { onSelect: (view: 'agenda' | 'services' | 'professionals' | 'clients') => void }) {
+  return <section className="form-page"><span className="eyebrow">CONFIGURAÇÕES</span><h2>Config</h2>
+    <ul className="tenant-list">
+      <li role="button" tabIndex={0} onClick={() => onSelect('agenda')}><div><b>Agenda</b><small>Autoagendamento e confirmação</small></div></li>
+      <li role="button" tabIndex={0} onClick={() => onSelect('services')}><div><b>Serviços</b><small>Cadastro de serviços</small></div></li>
+      <li role="button" tabIndex={0} onClick={() => onSelect('professionals')}><div><b>Profissionais</b><small>Cadastro de profissionais</small></div></li>
+      <li role="button" tabIndex={0} onClick={() => onSelect('clients')}><div><b>Clientes</b><small>Cadastro de clientes</small></div></li>
+    </ul>
+  </section>
+}
+
+function TenantConfig({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (tenant: Tenant) => void; onBack: () => void }) {
   const [selfScheduling, setSelfScheduling] = useState(tenant.self_scheduling_enabled)
   const [autoConfirm, setAutoConfirm] = useState(tenant.auto_confirm_appointments)
   const [saving, setSaving] = useState(false)
@@ -351,12 +457,24 @@ function TenantConfig({ tenant, onSaved }: { tenant: Tenant; onSaved: (tenant: T
         : 'Só a equipe cria agendamentos.'}</p>
       <button className="primary" disabled={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
     </form>
+    <button type="button" className="link-button" onClick={onBack}>Voltar</button>
   </section>
 }
 
-function ServicesManager({ services, onCreated }: { services: Service[]; onCreated: (service: Service) => void }) {
+type ServiceScreen = { name: 'list' } | { name: 'detail'; id: string } | { name: 'edit'; id: string } | { name: 'create' }
+
+function ServicesManager({ services, onCreated, onUpdated, onBack }: { services: Service[]; onCreated: (service: Service) => void; onUpdated: (service: Service) => void; onBack: () => void }) {
+  const [screen, setScreen] = useState<ServiceScreen>({ name: 'list' })
   const [name, setName] = useState(''); const [duration, setDuration] = useState('30'); const [price, setPrice] = useState('')
   const [saving, setSaving] = useState(false); const [error, setError] = useState('')
+  const [editName, setEditName] = useState(''); const [editDuration, setEditDuration] = useState(''); const [editPrice, setEditPrice] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
+
+  function startCreate() {
+    setName(''); setDuration('30'); setPrice(''); setError('')
+    setScreen({ name: 'create' })
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault(); setError('')
@@ -369,34 +487,115 @@ function ServicesManager({ services, onCreated }: { services: Service[]; onCreat
     setSaving(true)
     try {
       onCreated(await api.createService({ name, duration_minutes: durationMinutes, price_cents: priceCents }))
-      setName(''); setDuration('30'); setPrice('')
+      setScreen({ name: 'list' })
     }
     catch (err) { setError(errorMessage(err)) }
     finally { setSaving(false) }
   }
 
-  return <section className="form-page"><h2>Serviços</h2>
+  function startEdit(service: Service) {
+    setEditName(service.name)
+    setEditDuration(String(service.duration_minutes))
+    setEditPrice((service.price_cents / 100).toFixed(2).replace('.', ','))
+    setError('')
+    setScreen({ name: 'edit', id: service.id })
+  }
+
+  async function submitEdit(event: FormEvent) {
+    event.preventDefault(); setError('')
+    if (screen.name !== 'edit') return
+    const service = services.find(s => s.id === screen.id); if (!service) return
+    const durationMinutes = Number(editDuration)
+    const priceCents = Math.round(Number(editPrice.replace(',', '.')) * 100)
+    if (!Number.isFinite(durationMinutes) || durationMinutes < 5 || durationMinutes > 480) {
+      setError('Duração deve ser entre 5 e 480 minutos.'); return
+    }
+    if (!editPrice.trim() || !Number.isFinite(priceCents) || priceCents < 0) { setError('Informe um preço válido.'); return }
+    setEditSaving(true)
+    try {
+      onUpdated(await api.updateService(service.id, { name: editName.trim(), duration_minutes: durationMinutes, price_cents: priceCents, active: service.active }))
+      setScreen({ name: 'detail', id: service.id })
+    }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setEditSaving(false) }
+  }
+
+  async function toggleActive(service: Service) {
+    setError(''); setTogglingId(service.id)
+    try {
+      onUpdated(await api.updateService(service.id, { name: service.name, duration_minutes: service.duration_minutes, price_cents: service.price_cents, active: !service.active }))
+      setScreen({ name: 'list' })
+    }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setTogglingId(null) }
+  }
+
+  const detailService = screen.name === 'detail' ? services.find(s => s.id === screen.id) : undefined
+
+  return <section className="form-page">
+    <span className="eyebrow">CONFIGURAÇÕES</span><h2>Serviços</h2>
     {error && <div className="alert">{error}</div>}
-    {services.length === 0 ? <p>Nenhum serviço cadastrado.</p> : <ul className="tenant-list">
-      {services.map(s => <li key={s.id}><div><b>{s.name}</b><small>{s.duration_minutes} min · {money.format(s.price_cents / 100)}{!s.active ? ' · inativo' : ''}</small></div></li>)}
-    </ul>}
-    <form onSubmit={submit} className="quick">
+
+    {screen.name === 'list' && <>
+      {services.length === 0 ? <p>Nenhum serviço cadastrado.</p> : <ul className="tenant-list">
+        {services.map(s => <li key={s.id} role="button" tabIndex={0} onClick={() => setScreen({ name: 'detail', id: s.id })}>
+          <div><b>{s.name}</b><small>{s.duration_minutes} min · {money.format(s.price_cents / 100)}{!s.active ? ' · inativo' : ''}</small></div>
+        </li>)}
+      </ul>}
+      <button type="button" className="link-button" onClick={onBack}>Voltar</button>
+      <button className="fab" aria-label="Novo serviço" title="Novo serviço" onClick={startCreate}>+</button>
+    </>}
+
+    {detailService && <>
+      <h3>{detailService.name}</h3>
+      <p>{detailService.duration_minutes} min · {money.format(detailService.price_cents / 100)}{!detailService.active ? ' · inativo' : ''}</p>
+      <div className="quick">
+        <button type="button" onClick={() => startEdit(detailService)}>Editar</button>
+        <button type="button" disabled={togglingId === detailService.id} onClick={() => toggleActive(detailService)}>
+          {togglingId === detailService.id ? 'Salvando…' : detailService.active ? 'Excluir' : 'Reativar'}
+        </button>
+      </div>
+      <button type="button" className="link-button" onClick={() => setScreen({ name: 'list' })}>Voltar</button>
+    </>}
+
+    {screen.name === 'edit' && <form onSubmit={submitEdit} className="quick">
+      <input placeholder="Nome" required value={editName} onChange={e => setEditName(e.target.value)} />
+      <input type="number" min={5} max={480} placeholder="Duração (minutos)" required value={editDuration} onChange={e => setEditDuration(e.target.value)} />
+      <input type="text" inputMode="decimal" placeholder="Preço (R$)" required value={editPrice} onChange={e => setEditPrice(e.target.value)} />
+      <button disabled={editSaving}>{editSaving ? 'Salvando…' : 'Salvar'}</button>
+      <button type="button" onClick={() => setScreen({ name: 'detail', id: screen.id })}>Cancelar</button>
+    </form>}
+
+    {screen.name === 'create' && <form onSubmit={submit} className="quick">
       <input placeholder="Nome" required value={name} onChange={e => setName(e.target.value)} />
       <input type="number" min={5} max={480} placeholder="Duração (minutos)" required value={duration} onChange={e => setDuration(e.target.value)} />
       <input type="text" inputMode="decimal" placeholder="Preço (R$)" required value={price} onChange={e => setPrice(e.target.value)} />
       <button disabled={saving}>{saving ? 'Adicionando…' : 'Adicionar serviço'}</button>
-    </form>
+      <button type="button" onClick={() => setScreen({ name: 'list' })}>Cancelar</button>
+    </form>}
   </section>
 }
 
-function ProfessionalsManager({ professionals, onCreated }: { professionals: Professional[]; onCreated: (professional: Professional) => void }) {
+type ProfessionalScreen = { name: 'list' } | { name: 'detail'; id: string } | { name: 'edit'; id: string } | { name: 'create' }
+
+function ProfessionalsManager({ professionals, onCreated, onUpdated, onBack }: { professionals: Professional[]; onCreated: (professional: Professional) => void; onUpdated: (professional: Professional) => void; onBack: () => void }) {
+  const [screen, setScreen] = useState<ProfessionalScreen>({ name: 'list' })
   const [name, setName] = useState(''); const [phone, setPhone] = useState('')
   const [email, setEmail] = useState(''); const [cpf, setCpf] = useState('')
   const [saving, setSaving] = useState(false); const [error, setError] = useState('')
-  const [grantingId, setGrantingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState(''); const [editPhone, setEditPhone] = useState('')
+  const [editEmail, setEditEmail] = useState(''); const [editCpf, setEditCpf] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [granting, setGranting] = useState(false)
   const [grantPhone, setGrantPhone] = useState('')
   const [grantMessage, setGrantMessage] = useState('')
-  const [granting, setGranting] = useState(false)
+  const [grantSaving, setGrantSaving] = useState(false)
+
+  function startCreate() {
+    setName(''); setPhone(''); setEmail(''); setCpf(''); setError('')
+    setScreen({ name: 'create' })
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault(); setError('')
@@ -405,49 +604,223 @@ function ProfessionalsManager({ professionals, onCreated }: { professionals: Pro
     setSaving(true)
     try {
       onCreated(await api.createProfessional({ name, phone: toE164BR(phone), email, cpf: cpf.replace(/\D/g, '') }))
-      setName(''); setPhone(''); setEmail(''); setCpf('')
+      setScreen({ name: 'list' })
     }
     catch (err) { setError(errorMessage(err)) }
     finally { setSaving(false) }
   }
 
+  function startEdit(professional: Professional) {
+    setEditName(professional.name)
+    setEditPhone(professional.phone ? fromE164BR(professional.phone) : '')
+    setEditEmail(professional.email ?? '')
+    setEditCpf(professional.cpf ?? '')
+    setError('')
+    setScreen({ name: 'edit', id: professional.id })
+  }
+
+  async function submitEdit(event: FormEvent) {
+    event.preventDefault(); setError('')
+    if (screen.name !== 'edit') return
+    const professional = professionals.find(p => p.id === screen.id); if (!professional) return
+    if (editEmail.trim() && !isValidEmail(editEmail.trim())) { setError('Informe um e-mail válido ou deixe em branco.'); return }
+    if (editCpf.trim() && !isValidCPF(editCpf)) { setError('CPF inválido.'); return }
+    setEditSaving(true)
+    try {
+      onUpdated(await api.updateProfessional(professional.id, {
+        name: editName.trim(), phone: toE164BR(editPhone), email: editEmail.trim(), cpf: editCpf.replace(/\D/g, ''), active: professional.active
+      }))
+      setScreen({ name: 'detail', id: professional.id })
+    }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setEditSaving(false) }
+  }
+
+  async function toggleActive(professional: Professional) {
+    setError(''); setTogglingId(professional.id)
+    try {
+      onUpdated(await api.updateProfessional(professional.id, {
+        name: professional.name, phone: professional.phone, email: professional.email, cpf: professional.cpf, active: !professional.active
+      }))
+      setScreen({ name: 'list' })
+    }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setTogglingId(null) }
+  }
+
   function startGrant(professional: Professional) {
-    setGrantingId(professional.id)
+    setGranting(true)
     setGrantPhone(professional.phone ? fromE164BR(professional.phone) : '')
     setGrantMessage(''); setError('')
   }
 
   async function submitGrant(event: FormEvent) {
-    event.preventDefault(); setError(''); setGrantMessage(''); setGranting(true)
-    try { setGrantMessage((await api.grantProfessionalAccess(grantingId!, toE164BR(grantPhone))).message) }
+    event.preventDefault()
+    if (screen.name !== 'detail') return
+    setError(''); setGrantMessage(''); setGrantSaving(true)
+    try { setGrantMessage((await api.grantProfessionalAccess(screen.id, toE164BR(grantPhone))).message) }
     catch (err) { setError(errorMessage(err)) }
-    finally { setGranting(false) }
+    finally { setGrantSaving(false) }
   }
 
-  const grantingProfessional = professionals.find(p => p.id === grantingId)
+  const detailProfessional = screen.name === 'detail' ? professionals.find(p => p.id === screen.id) : undefined
 
-  return <section className="form-page"><h2>Profissionais</h2>
+  return <section className="form-page">
+    <span className="eyebrow">CONFIGURAÇÕES</span><h2>Profissionais</h2>
     {error && <div className="alert">{error}</div>}
-    {professionals.length === 0 ? <p>Nenhum profissional cadastrado.</p> : <ul className="tenant-list">
-      {professionals.map(p => <li key={p.id}>
-        <div><b>{p.name}</b>{!p.active && <small> · inativo</small>}{(p.email || p.phone) && <small> · {[p.email, p.phone].filter(Boolean).join(' · ')}</small>}</div>
-        <button type="button" onClick={() => startGrant(p)}>Conceder acesso</button>
-      </li>)}
-    </ul>}
-    {grantingProfessional && <form onSubmit={submitGrant} className="quick">
-      <p>Enviar senha de acesso ao app para <b>{grantingProfessional.name}</b> por SMS/WhatsApp:</p>
-      {grantMessage && <p>{grantMessage}</p>}
-      <input type="tel" placeholder="(11) 99999-0000" required value={grantPhone} onChange={e => setGrantPhone(maskPhone(e.target.value))} maxLength={16} />
-      <button disabled={granting}>{granting ? 'Enviando…' : 'Enviar senha'}</button>
-      <button type="button" onClick={() => setGrantingId(null)}>Fechar</button>
+
+    {screen.name === 'list' && <>
+      {professionals.length === 0 ? <p>Nenhum profissional cadastrado.</p> : <ul className="tenant-list">
+        {professionals.map(p => <li key={p.id} role="button" tabIndex={0} onClick={() => setScreen({ name: 'detail', id: p.id })}>
+          <div><b>{p.name}</b>{!p.active && <small> · inativo</small>}{(p.email || p.phone) && <small> · {[p.email, p.phone].filter(Boolean).join(' · ')}</small>}</div>
+        </li>)}
+      </ul>}
+      <button type="button" className="link-button" onClick={onBack}>Voltar</button>
+      <button className="fab" aria-label="Novo profissional" title="Novo profissional" onClick={startCreate}>+</button>
+    </>}
+
+    {detailProfessional && <>
+      <h3>{detailProfessional.name}</h3>
+      <p>{!detailProfessional.active && 'Inativo'}{(detailProfessional.email || detailProfessional.phone) && ((!detailProfessional.active ? ' · ' : '') + [detailProfessional.email, detailProfessional.phone].filter(Boolean).join(' · '))}</p>
+      <div className="quick">
+        <button type="button" onClick={() => startEdit(detailProfessional)}>Editar</button>
+        <button type="button" disabled={togglingId === detailProfessional.id} onClick={() => toggleActive(detailProfessional)}>
+          {togglingId === detailProfessional.id ? 'Salvando…' : detailProfessional.active ? 'Excluir' : 'Reativar'}
+        </button>
+        <button type="button" onClick={() => startGrant(detailProfessional)}>Conceder acesso</button>
+      </div>
+      {granting && <form onSubmit={submitGrant} className="quick">
+        <p>Enviar senha de acesso ao app para <b>{detailProfessional.name}</b> por SMS/WhatsApp:</p>
+        {grantMessage && <p>{grantMessage}</p>}
+        <input type="tel" placeholder="(11) 99999-0000" required value={grantPhone} onChange={e => setGrantPhone(maskPhone(e.target.value))} maxLength={16} />
+        <button disabled={grantSaving}>{grantSaving ? 'Enviando…' : 'Enviar senha'}</button>
+        <button type="button" onClick={() => setGranting(false)}>Fechar</button>
+      </form>}
+      <button type="button" className="link-button" onClick={() => { setGranting(false); setScreen({ name: 'list' }) }}>Voltar</button>
+    </>}
+
+    {screen.name === 'edit' && <form onSubmit={submitEdit} className="quick">
+      <input placeholder="Nome" required value={editName} onChange={e => setEditName(e.target.value)} />
+      <input type="tel" placeholder="(11) 99999-0000 (opcional)" value={editPhone} onChange={e => setEditPhone(maskPhone(e.target.value))} maxLength={16} />
+      <input type="email" placeholder="E-mail (opcional)" value={editEmail} onChange={e => setEditEmail(e.target.value)} />
+      <input placeholder="CPF (opcional)" value={editCpf} onChange={e => setEditCpf(maskCPF(e.target.value))} maxLength={14} />
+      <button disabled={editSaving}>{editSaving ? 'Salvando…' : 'Salvar'}</button>
+      <button type="button" onClick={() => setScreen({ name: 'detail', id: screen.id })}>Cancelar</button>
     </form>}
-    <form onSubmit={submit} className="quick">
+
+    {screen.name === 'create' && <form onSubmit={submit} className="quick">
       <input placeholder="Nome" required value={name} onChange={e => setName(e.target.value)} />
       <input type="tel" placeholder="(11) 99999-0000 (opcional)" value={phone} onChange={e => setPhone(maskPhone(e.target.value))} maxLength={16} />
       <input type="email" placeholder="E-mail (opcional)" value={email} onChange={e => setEmail(e.target.value)} />
       <input placeholder="CPF (opcional)" value={cpf} onChange={e => setCpf(maskCPF(e.target.value))} maxLength={14} />
       <button disabled={saving}>{saving ? 'Adicionando…' : 'Adicionar profissional'}</button>
-    </form>
+      <button type="button" onClick={() => setScreen({ name: 'list' })}>Cancelar</button>
+    </form>}
+  </section>
+}
+
+type ClientScreen = { name: 'list' } | { name: 'detail'; id: string } | { name: 'edit'; id: string } | { name: 'create' }
+
+function ClientsManager({ customers, onCreated, onUpdated, onBack }: { customers: Customer[]; onCreated: (customer: Customer) => void; onUpdated: (customer: Customer) => void; onBack: () => void }) {
+  const [screen, setScreen] = useState<ClientScreen>({ name: 'list' })
+  const [name, setName] = useState(''); const [phone, setPhone] = useState(''); const [email, setEmail] = useState('')
+  const [saving, setSaving] = useState(false); const [error, setError] = useState('')
+  const [editName, setEditName] = useState(''); const [editPhone, setEditPhone] = useState(''); const [editEmail, setEditEmail] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
+
+  function startCreate() {
+    setName(''); setPhone(''); setEmail(''); setError('')
+    setScreen({ name: 'create' })
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setError('')
+    if (email.trim() && !isValidEmail(email.trim())) { setError('Informe um e-mail válido ou deixe em branco.'); return }
+    setSaving(true)
+    try {
+      onCreated(await api.createCustomer({ name, phone: toE164BR(phone), email }))
+      setScreen({ name: 'list' })
+    }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setSaving(false) }
+  }
+
+  function startEdit(customer: Customer) {
+    setEditName(customer.name)
+    setEditPhone(customer.phone ? fromE164BR(customer.phone) : '')
+    setEditEmail(customer.email ?? '')
+    setError('')
+    setScreen({ name: 'edit', id: customer.id })
+  }
+
+  async function submitEdit(event: FormEvent) {
+    event.preventDefault(); setError('')
+    if (screen.name !== 'edit') return
+    const customer = customers.find(c => c.id === screen.id); if (!customer) return
+    if (editEmail.trim() && !isValidEmail(editEmail.trim())) { setError('Informe um e-mail válido ou deixe em branco.'); return }
+    setEditSaving(true)
+    try {
+      onUpdated(await api.updateCustomer(customer.id, { name: editName.trim(), phone: toE164BR(editPhone), email: editEmail.trim(), active: customer.active }))
+      setScreen({ name: 'detail', id: customer.id })
+    }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setEditSaving(false) }
+  }
+
+  async function toggleActive(customer: Customer) {
+    setError(''); setTogglingId(customer.id)
+    try {
+      onUpdated(await api.updateCustomer(customer.id, { name: customer.name, phone: customer.phone, email: customer.email, active: !customer.active }))
+      setScreen({ name: 'list' })
+    }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setTogglingId(null) }
+  }
+
+  const detailCustomer = screen.name === 'detail' ? customers.find(c => c.id === screen.id) : undefined
+
+  return <section className="form-page">
+    <span className="eyebrow">CONFIGURAÇÕES</span><h2>Clientes</h2>
+    {error && <div className="alert">{error}</div>}
+
+    {screen.name === 'list' && <>
+      {customers.length === 0 ? <p>Nenhum cliente cadastrado.</p> : <ul className="tenant-list">
+        {customers.map(c => <li key={c.id} role="button" tabIndex={0} onClick={() => setScreen({ name: 'detail', id: c.id })}>
+          <div><b>{c.name}</b>{!c.active && <small> · inativo</small>}{(c.email || c.phone) && <small> · {[c.email, c.phone].filter(Boolean).join(' · ')}</small>}</div>
+        </li>)}
+      </ul>}
+      <button type="button" className="link-button" onClick={onBack}>Voltar</button>
+      <button className="fab" aria-label="Novo cliente" title="Novo cliente" onClick={startCreate}>+</button>
+    </>}
+
+    {detailCustomer && <>
+      <h3>{detailCustomer.name}</h3>
+      <p>{!detailCustomer.active && 'Inativo'}{(detailCustomer.email || detailCustomer.phone) && ((!detailCustomer.active ? ' · ' : '') + [detailCustomer.email, detailCustomer.phone].filter(Boolean).join(' · '))}</p>
+      <div className="quick">
+        <button type="button" onClick={() => startEdit(detailCustomer)}>Editar</button>
+        <button type="button" disabled={togglingId === detailCustomer.id} onClick={() => toggleActive(detailCustomer)}>
+          {togglingId === detailCustomer.id ? 'Salvando…' : detailCustomer.active ? 'Excluir' : 'Reativar'}
+        </button>
+      </div>
+      <button type="button" className="link-button" onClick={() => setScreen({ name: 'list' })}>Voltar</button>
+    </>}
+
+    {screen.name === 'edit' && <form onSubmit={submitEdit} className="quick">
+      <input placeholder="Nome" required value={editName} onChange={e => setEditName(e.target.value)} />
+      <input type="tel" placeholder="(11) 99999-0000 (opcional)" value={editPhone} onChange={e => setEditPhone(maskPhone(e.target.value))} maxLength={16} />
+      <input type="email" placeholder="E-mail (opcional)" value={editEmail} onChange={e => setEditEmail(e.target.value)} />
+      <button disabled={editSaving}>{editSaving ? 'Salvando…' : 'Salvar'}</button>
+      <button type="button" onClick={() => setScreen({ name: 'detail', id: screen.id })}>Cancelar</button>
+    </form>}
+
+    {screen.name === 'create' && <form onSubmit={submit} className="quick">
+      <input placeholder="Nome" required value={name} onChange={e => setName(e.target.value)} />
+      <input type="tel" placeholder="(11) 99999-0000 (opcional)" value={phone} onChange={e => setPhone(maskPhone(e.target.value))} maxLength={16} />
+      <input type="email" placeholder="E-mail (opcional)" value={email} onChange={e => setEmail(e.target.value)} />
+      <button disabled={saving}>{saving ? 'Adicionando…' : 'Adicionar cliente'}</button>
+      <button type="button" onClick={() => setScreen({ name: 'list' })}>Cancelar</button>
+    </form>}
   </section>
 }
 
