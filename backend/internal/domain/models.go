@@ -44,8 +44,14 @@ const (
 // this way.
 const MaxLoginAttempts = 3
 
+// User is a joined view of a membership (which tenant, which role, which
+// customer/professional record) plus the identity backing it (name,
+// contact, credentials). It's what every handler/JSON response works with;
+// see Identity for the standalone identity-only view used during login
+// before a specific membership has been resolved.
 type User struct {
 	ID                  string    `json:"id"`
+	IdentityID          string    `json:"-"`
 	TenantID            string    `json:"tenant_id"`
 	Name                string    `json:"name"`
 	Email               string    `json:"email,omitempty"`
@@ -63,6 +69,37 @@ type User struct {
 }
 
 func (u User) Locked() bool { return !u.LockedAt.IsZero() }
+
+// Identity is a person's login credentials — one row, one password, shared
+// across every barbershop (Membership) that person is enrolled in. Looked
+// up first by email/phone/social id during login, before any tenant is
+// known.
+type Identity struct {
+	ID                  string    `json:"id"`
+	Name                string    `json:"name"`
+	Email               string    `json:"email,omitempty"`
+	Phone               string    `json:"phone,omitempty"`
+	PasswordHash        string    `json:"-"`
+	GoogleID            string    `json:"-"`
+	FacebookID          string    `json:"-"`
+	FailedLoginAttempts int       `json:"-"`
+	LockedAt            time.Time `json:"-"`
+	CreatedAt           time.Time `json:"created_at"`
+}
+
+func (i Identity) Locked() bool { return !i.LockedAt.IsZero() }
+
+// MembershipOption is one barbershop an identity is enrolled in, offered
+// as a choice when login resolves to more than one — see
+// server.resolveLogin.
+type MembershipOption struct {
+	MembershipID string `json:"membership_id"`
+	IdentityID   string `json:"-"`
+	TenantID     string `json:"tenant_id"`
+	TenantName   string `json:"tenant_name"`
+	TenantSlug   string `json:"tenant_slug"`
+	Role         string `json:"role"`
+}
 
 type Service struct {
 	ID              string    `json:"id"`
@@ -163,6 +200,7 @@ type Customer struct {
 	Name      string    `json:"name"`
 	Phone     string    `json:"phone,omitempty"`
 	Email     string    `json:"email,omitempty"`
+	Active    bool      `json:"active"`
 	CreatedAt time.Time `json:"created_at"`
 }
 

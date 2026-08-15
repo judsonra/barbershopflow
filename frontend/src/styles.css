@@ -14,6 +14,8 @@ main { padding: 20px 18px; }
 .date-nav { display: flex; justify-content: space-between; align-items: center; background: white; border-radius: 16px; padding: 10px; box-shadow: 0 6px 24px #1e293b0c; }
 .date-nav button { border: 0; background: #f2eee6; width: 42px; height: 42px; border-radius: 12px; font-size: 26px; }
 .date-nav div { text-align: center; display: grid; gap: 2px; }.date-nav small { color: #7b8290; }
+.filters { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.filters select { flex: 1; min-width: 0; border: 0; border-radius: 10px; padding: 9px 10px; background: white; box-shadow: 0 5px 18px #1e293b0a; font-size: 13px; }
 .appointments { display: grid; gap: 12px; margin-top: 18px; }
 .card { display: grid; grid-template-columns: 62px 1fr; background: white; border-radius: 15px; padding: 16px 14px; border-left: 4px solid #d6a85f; box-shadow: 0 5px 18px #1e293b0a; }
 .card.cancelled { opacity: .58; border-color: #9ca3af; }.card.completed { border-color: #3d8b6d; }
@@ -59,4 +61,5 @@ details { border: 1px dashed #c8bda9; border-radius: 11px; padding: 11px; }summa
 .tenant-list li { background: white; border-radius: 15px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; gap: 10px; box-shadow: 0 5px 18px #1e293b0a; }
 .tenant-list small { display: block; color: #7b8290; margin-top: 2px; }
 .tenant-list button { border: 0; border-radius: 8px; padding: 9px 12px; background: #e9dfcf; font-size: 12px; white-space: nowrap; }
+.tenant-list li[role="button"] { cursor: pointer; }
 @media (min-width: 700px) { body { padding: 24px 0; }.app-shell { min-height: calc(100dvh - 48px); border-radius: 24px; overflow: hidden; } }

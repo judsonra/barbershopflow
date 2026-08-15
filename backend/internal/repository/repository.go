@@ -48,6 +48,20 @@ func (r *Repository) CreateService(ctx context.Context, tenantID string, item do
 	return item, err
 }
 
+func (r *Repository) UpdateService(ctx context.Context, tenantID, id string, item domain.Service) (domain.Service, error) {
+	item.ID = id
+	err := r.db.QueryRow(ctx, `
+		UPDATE services SET name=$3, duration_minutes=$4, price_cents=$5, active=$6
+		WHERE id=$1 AND tenant_id=$2
+		RETURNING id, name, duration_minutes, price_cents, active, created_at`,
+		id, tenantID, item.Name, item.DurationMinutes, item.PriceCents, item.Active).
+		Scan(&item.ID, &item.Name, &item.DurationMinutes, &item.PriceCents, &item.Active, &item.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return item, domain.ErrNotFound
+	}
+	return item, err
+}
+
 func (r *Repository) ListProfessionals(ctx context.Context, tenantID string) ([]domain.Professional, error) {
 	rows, err := r.db.Query(ctx, `SELECT id, name, phone, email, cpf, active, created_at FROM professionals WHERE tenant_id=$1 ORDER BY name`, tenantID)
 	if err != nil {
@@ -70,6 +84,23 @@ func (r *Repository) CreateProfessional(ctx context.Context, tenantID string, it
 		tenantID, item.Name, item.Phone, item.Email, item.CPF).Scan(&item.ID, &item.Active, &item.CreatedAt)
 	if _, ok := isUniqueViolation(err); ok {
 		return item, domain.ErrConflict
+	}
+	return item, err
+}
+
+func (r *Repository) UpdateProfessional(ctx context.Context, tenantID, id string, item domain.Professional) (domain.Professional, error) {
+	item.ID = id
+	err := r.db.QueryRow(ctx, `
+		UPDATE professionals SET name=$3, phone=$4, email=$5, cpf=$6, active=$7
+		WHERE id=$1 AND tenant_id=$2
+		RETURNING id, name, phone, email, cpf, active, created_at`,
+		id, tenantID, item.Name, item.Phone, item.Email, item.CPF, item.Active).
+		Scan(&item.ID, &item.Name, &item.Phone, &item.Email, &item.CPF, &item.Active, &item.CreatedAt)
+	if _, ok := isUniqueViolation(err); ok {
+		return item, domain.ErrConflict
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return item, domain.ErrNotFound
 	}
 	return item, err
 }
@@ -101,26 +132,6 @@ func (r *Repository) UpdateProfessionalPhone(ctx context.Context, tenantID, prof
 		return domain.ErrNotFound
 	}
 	return nil
-}
-
-// UpsertProfessionalCredentials grants (or regenerates) a professional's
-// phone-login password — the same mechanism as UpsertClientCredentials,
-// just tied to professional_id/role=professional instead of customer_id.
-func (r *Repository) UpsertProfessionalCredentials(ctx context.Context, tenantID, professionalID, name, phone, passwordHash string) (domain.User, error) {
-	item := domain.User{}
-	err := r.db.QueryRow(ctx, `
-		INSERT INTO users(tenant_id, name, phone, password_hash, role, professional_id)
-		VALUES($1,$2,$3,$4,'professional',$5)
-		ON CONFLICT (professional_id) WHERE professional_id IS NOT NULL DO UPDATE SET
-			name = EXCLUDED.name,
-			phone = EXCLUDED.phone,
-			password_hash = EXCLUDED.password_hash,
-			failed_login_attempts = 0,
-			locked_at = NULL
-		RETURNING `+userColumns,
-		tenantID, name, phone, passwordHash, professionalID).
-		Scan(userScanTargets(&item)...)
-	return item, err
 }
 
 func (r *Repository) GetProfessionalSchedule(ctx context.Context, tenantID, professionalID string) ([]domain.ScheduleEntry, error) {
@@ -223,7 +234,7 @@ func (r *Repository) DeleteTimeOff(ctx context.Context, tenantID, professionalID
 }
 
 func (r *Repository) ListCustomers(ctx context.Context, tenantID string) ([]domain.Customer, error) {
-	rows, err := r.db.Query(ctx, `SELECT id, name, phone, email, created_at FROM customers WHERE tenant_id=$1 ORDER BY name`, tenantID)
+	rows, err := r.db.Query(ctx, `SELECT id, name, phone, email, active, created_at FROM customers WHERE tenant_id=$1 ORDER BY name`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +242,7 @@ func (r *Repository) ListCustomers(ctx context.Context, tenantID string) ([]doma
 	items := []domain.Customer{}
 	for rows.Next() {
 		var item domain.Customer
-		if err := rows.Scan(&item.ID, &item.Name, &item.Phone, &item.Email, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Phone, &item.Email, &item.Active, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -240,15 +251,29 @@ func (r *Repository) ListCustomers(ctx context.Context, tenantID string) ([]doma
 }
 
 func (r *Repository) CreateCustomer(ctx context.Context, tenantID string, item domain.Customer) (domain.Customer, error) {
-	err := r.db.QueryRow(ctx, `INSERT INTO customers(tenant_id, name, phone, email) VALUES($1,$2,$3,$4) RETURNING id, created_at`,
-		tenantID, item.Name, item.Phone, item.Email).Scan(&item.ID, &item.CreatedAt)
+	err := r.db.QueryRow(ctx, `INSERT INTO customers(tenant_id, name, phone, email) VALUES($1,$2,$3,$4) RETURNING id, active, created_at`,
+		tenantID, item.Name, item.Phone, item.Email).Scan(&item.ID, &item.Active, &item.CreatedAt)
+	return item, err
+}
+
+func (r *Repository) UpdateCustomer(ctx context.Context, tenantID, id string, item domain.Customer) (domain.Customer, error) {
+	item.ID = id
+	err := r.db.QueryRow(ctx, `
+		UPDATE customers SET name=$3, phone=$4, email=$5, active=$6
+		WHERE id=$1 AND tenant_id=$2
+		RETURNING id, name, phone, email, active, created_at`,
+		id, tenantID, item.Name, item.Phone, item.Email, item.Active).
+		Scan(&item.ID, &item.Name, &item.Phone, &item.Email, &item.Active, &item.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return item, domain.ErrNotFound
+	}
 	return item, err
 }
 
 func (r *Repository) GetCustomerByID(ctx context.Context, tenantID, id string) (domain.Customer, error) {
 	var item domain.Customer
-	err := r.db.QueryRow(ctx, `SELECT id, name, phone, email, created_at FROM customers WHERE id=$1 AND tenant_id=$2`, id, tenantID).
-		Scan(&item.ID, &item.Name, &item.Phone, &item.Email, &item.CreatedAt)
+	err := r.db.QueryRow(ctx, `SELECT id, name, phone, email, active, created_at FROM customers WHERE id=$1 AND tenant_id=$2`, id, tenantID).
+		Scan(&item.ID, &item.Name, &item.Phone, &item.Email, &item.Active, &item.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item, domain.ErrNotFound
 	}
@@ -416,101 +441,216 @@ func (r *Repository) GetAppointmentProfessionalID(ctx context.Context, tenantID,
 	return professionalID, err
 }
 
-const userColumns = `id, tenant_id, name, email, phone, password_hash, google_id, facebook_id, role,
-	professional_id, customer_id, failed_login_attempts, locked_at, active, created_at`
+const identityColumns = `id, name, email, phone, password_hash, google_id, facebook_id,
+	failed_login_attempts, locked_at, created_at`
 
-func (r *Repository) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
-	return r.scanUser(r.db.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE lower(email)=lower($1)`, email))
+func identityScanTargets(item *domain.Identity) []any {
+	return []any{
+		&item.ID, &item.Name, &nullString{&item.Email}, &nullString{&item.Phone}, &nullString{&item.PasswordHash},
+		&nullString{&item.GoogleID}, &nullString{&item.FacebookID},
+		&item.FailedLoginAttempts, &nullTime{&item.LockedAt}, &item.CreatedAt,
+	}
 }
 
-func (r *Repository) GetUserByPhone(ctx context.Context, phone string) (domain.User, error) {
-	return r.scanUser(r.db.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE phone=$1`, phone))
-}
-
-func (r *Repository) GetUserByGoogleID(ctx context.Context, googleID string) (domain.User, error) {
-	return r.scanUser(r.db.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE google_id=$1`, googleID))
-}
-
-func (r *Repository) GetUserByFacebookID(ctx context.Context, facebookID string) (domain.User, error) {
-	return r.scanUser(r.db.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE facebook_id=$1`, facebookID))
-}
-
-func (r *Repository) GetUserByID(ctx context.Context, id string) (domain.User, error) {
-	return r.scanUser(r.db.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id=$1`, id))
-}
-
-// CreateClientUser provisions a brand-new customer + login pair from a
-// social login self-registration (google/facebook id set, no password).
-// item.TenantID must already be set by the caller.
-func (r *Repository) CreateClientUser(ctx context.Context, item domain.User) (domain.User, error) {
-	err := r.db.QueryRow(ctx, `
-		INSERT INTO users(tenant_id, name, email, phone, password_hash, google_id, facebook_id, role, customer_id)
-		VALUES($1,$2,$3,$4,$5,$6,$7,'client',$8)
-		RETURNING `+userColumns,
-		item.TenantID, item.Name, nullable(item.Email), nullable(item.Phone), nullable(item.PasswordHash),
-		nullable(item.GoogleID), nullable(item.FacebookID), item.CustomerID).
-		Scan(userScanTargets(&item)...)
+func (r *Repository) scanIdentity(row pgx.Row) (domain.Identity, error) {
+	var item domain.Identity
+	err := row.Scan(identityScanTargets(&item)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return item, domain.ErrNotFound
+	}
 	return item, err
 }
 
-// LinkGoogleID attaches a Google account to an existing user (staff account
-// recovery, or a returning client).
-func (r *Repository) LinkGoogleID(ctx context.Context, userID, googleID string) error {
-	_, err := r.db.Exec(ctx, `UPDATE users SET google_id=$2 WHERE id=$1`, userID, googleID)
+func (r *Repository) FindIdentityByEmail(ctx context.Context, email string) (domain.Identity, error) {
+	return r.scanIdentity(r.db.QueryRow(ctx, `SELECT `+identityColumns+` FROM identities WHERE lower(email)=lower($1)`, email))
+}
+
+func (r *Repository) FindIdentityByPhone(ctx context.Context, phone string) (domain.Identity, error) {
+	return r.scanIdentity(r.db.QueryRow(ctx, `SELECT `+identityColumns+` FROM identities WHERE phone=$1`, phone))
+}
+
+func (r *Repository) FindIdentityByGoogleID(ctx context.Context, googleID string) (domain.Identity, error) {
+	return r.scanIdentity(r.db.QueryRow(ctx, `SELECT `+identityColumns+` FROM identities WHERE google_id=$1`, googleID))
+}
+
+func (r *Repository) FindIdentityByFacebookID(ctx context.Context, facebookID string) (domain.Identity, error) {
+	return r.scanIdentity(r.db.QueryRow(ctx, `SELECT `+identityColumns+` FROM identities WHERE facebook_id=$1`, facebookID))
+}
+
+// LinkGoogleID attaches a Google account to an existing identity (staff
+// account recovery, or a returning client).
+func (r *Repository) LinkGoogleID(ctx context.Context, identityID, googleID string) error {
+	_, err := r.db.Exec(ctx, `UPDATE identities SET google_id=$2 WHERE id=$1`, identityID, googleID)
 	return err
 }
 
-func (r *Repository) LinkFacebookID(ctx context.Context, userID, facebookID string) error {
-	_, err := r.db.Exec(ctx, `UPDATE users SET facebook_id=$2 WHERE id=$1`, userID, facebookID)
+func (r *Repository) LinkFacebookID(ctx context.Context, identityID, facebookID string) error {
+	_, err := r.db.Exec(ctx, `UPDATE identities SET facebook_id=$2 WHERE id=$1`, identityID, facebookID)
 	return err
 }
 
-// SetPassword is used both when the barber grants a client phone access and
-// when a locked-out client recovers via a new SMS/WhatsApp password. Both
-// cases should also clear the lockout.
-func (r *Repository) SetPassword(ctx context.Context, userID, passwordHash string) error {
-	_, err := r.db.Exec(ctx, `UPDATE users SET password_hash=$2, failed_login_attempts=0, locked_at=NULL WHERE id=$1`, userID, passwordHash)
+// SetPassword is used both when staff grants phone access and when a
+// locked-out identity recovers via a new SMS/WhatsApp password. Both cases
+// also clear the lockout. Operating on the identity (not a membership)
+// means a password reset applies to every barbershop that identity is
+// enrolled in at once — there's only ever one password to begin with.
+func (r *Repository) SetPassword(ctx context.Context, identityID, passwordHash string) error {
+	_, err := r.db.Exec(ctx, `UPDATE identities SET password_hash=$2, failed_login_attempts=0, locked_at=NULL WHERE id=$1`, identityID, passwordHash)
 	return err
 }
 
-func (r *Repository) ResetLoginAttempts(ctx context.Context, userID string) error {
-	_, err := r.db.Exec(ctx, `UPDATE users SET failed_login_attempts=0, locked_at=NULL WHERE id=$1`, userID)
+func (r *Repository) ResetLoginAttempts(ctx context.Context, identityID string) error {
+	_, err := r.db.Exec(ctx, `UPDATE identities SET failed_login_attempts=0, locked_at=NULL WHERE id=$1`, identityID)
 	return err
 }
 
 // IncrementFailedLogin records a failed password attempt and locks the
-// account once domain.MaxLoginAttempts is reached, returning whether it is
-// now locked.
-func (r *Repository) IncrementFailedLogin(ctx context.Context, userID string) (bool, error) {
+// identity once domain.MaxLoginAttempts is reached, returning whether it is
+// now locked. Identity-scoped on purpose: trying a different barbershop's
+// membership isn't a fresh set of attempts.
+func (r *Repository) IncrementFailedLogin(ctx context.Context, identityID string) (bool, error) {
 	var locked bool
 	err := r.db.QueryRow(ctx, `
-		UPDATE users SET
+		UPDATE identities SET
 			failed_login_attempts = failed_login_attempts + 1,
 			locked_at = CASE WHEN failed_login_attempts + 1 >= $2 THEN now() ELSE locked_at END
 		WHERE id=$1
-		RETURNING locked_at IS NOT NULL`, userID, domain.MaxLoginAttempts).Scan(&locked)
+		RETURNING locked_at IS NOT NULL`, identityID, domain.MaxLoginAttempts).Scan(&locked)
 	return locked, err
 }
 
-// UpsertClientCredentials grants (or regenerates) a customer's phone-login
-// password: creates the linked user on first use, or resets its password
-// and lockout state on subsequent calls. Callers must have already
-// confirmed customerID belongs to tenantID (e.g. via GetCustomerByID).
-func (r *Repository) UpsertClientCredentials(ctx context.Context, tenantID, customerID, name, phone, passwordHash string) (domain.User, error) {
-	item := domain.User{}
-	err := r.db.QueryRow(ctx, `
-		INSERT INTO users(tenant_id, name, phone, password_hash, role, customer_id)
-		VALUES($1,$2,$3,$4,'client',$5)
-		ON CONFLICT (customer_id) WHERE customer_id IS NOT NULL DO UPDATE SET
-			name = EXCLUDED.name,
-			phone = EXCLUDED.phone,
-			password_hash = EXCLUDED.password_hash,
-			failed_login_attempts = 0,
-			locked_at = NULL
-		RETURNING `+userColumns,
-		tenantID, name, phone, passwordHash, customerID).
-		Scan(userScanTargets(&item)...)
+const membershipColumns = `m.id, m.tenant_id, i.name, i.email, i.phone, i.password_hash, i.google_id, i.facebook_id,
+	m.role, m.professional_id, m.customer_id, i.failed_login_attempts, i.locked_at, m.active, m.created_at, i.id`
+
+const membershipJoin = `FROM memberships m JOIN identities i ON i.id = m.identity_id`
+
+func membershipScanTargets(item *domain.User) []any {
+	return []any{
+		&item.ID, &item.TenantID, &item.Name, &nullString{&item.Email}, &nullString{&item.Phone}, &nullString{&item.PasswordHash},
+		&nullString{&item.GoogleID}, &nullString{&item.FacebookID}, &item.Role,
+		&nullString{&item.ProfessionalID}, &nullString{&item.CustomerID},
+		&item.FailedLoginAttempts, &nullTime{&item.LockedAt}, &item.Active, &item.CreatedAt, &item.IdentityID,
+	}
+}
+
+func (r *Repository) scanMembership(row pgx.Row) (domain.User, error) {
+	var item domain.User
+	err := row.Scan(membershipScanTargets(&item)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return item, domain.ErrNotFound
+	}
 	return item, err
+}
+
+func (r *Repository) GetMembershipByID(ctx context.Context, membershipID string) (domain.User, error) {
+	return r.scanMembership(r.db.QueryRow(ctx, `SELECT `+membershipColumns+` `+membershipJoin+` WHERE m.id=$1`, membershipID))
+}
+
+// GetMembershipForIdentityAndTenant backs the social-login self-service
+// path: does this identity already have a membership at this specific
+// barbershop? Used to tell "returning client at a barbershop they already
+// know" apart from "client known elsewhere, first time here".
+func (r *Repository) GetMembershipForIdentityAndTenant(ctx context.Context, identityID, tenantID string) (domain.User, error) {
+	return r.scanMembership(r.db.QueryRow(ctx, `SELECT `+membershipColumns+` `+membershipJoin+` WHERE m.identity_id=$1 AND m.tenant_id=$2`, identityID, tenantID))
+}
+
+// GetMembershipForIdentity confirms membershipID actually belongs to
+// identityID before minting a token for it — see server.selectMembership.
+func (r *Repository) GetMembershipForIdentity(ctx context.Context, identityID, membershipID string) (domain.User, error) {
+	return r.scanMembership(r.db.QueryRow(ctx, `SELECT `+membershipColumns+` `+membershipJoin+` WHERE m.identity_id=$1 AND m.id=$2`, identityID, membershipID))
+}
+
+func (r *Repository) FindMembershipByCustomerID(ctx context.Context, customerID string) (domain.User, error) {
+	return r.scanMembership(r.db.QueryRow(ctx, `SELECT `+membershipColumns+` `+membershipJoin+` WHERE m.customer_id=$1`, customerID))
+}
+
+func (r *Repository) FindMembershipByProfessionalID(ctx context.Context, professionalID string) (domain.User, error) {
+	return r.scanMembership(r.db.QueryRow(ctx, `SELECT `+membershipColumns+` `+membershipJoin+` WHERE m.professional_id=$1`, professionalID))
+}
+
+// ListMembershipsByIdentity backs login's "which barbearia" resolution: an
+// identity with more than one active membership can't be logged into
+// directly — the caller shows this list and finishes via a chosen
+// membership id (see server.resolveLogin / server.selectMembership).
+func (r *Repository) ListMembershipsByIdentity(ctx context.Context, identityID string) ([]domain.MembershipOption, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT m.id, m.tenant_id, t.name, t.slug, m.role
+		FROM memberships m JOIN tenants t ON t.id = m.tenant_id
+		WHERE m.identity_id=$1 AND m.active=true
+		ORDER BY t.name`, identityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.MembershipOption{}
+	for rows.Next() {
+		var item domain.MembershipOption
+		if err := rows.Scan(&item.MembershipID, &item.TenantID, &item.TenantName, &item.TenantSlug, &item.Role); err != nil {
+			return nil, err
+		}
+		item.IdentityID = identityID
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// AttachMembership links an *already existing* identity to a tenant it
+// doesn't have a membership at yet — a client known at another barbershop
+// visiting a new one for the first time, or staff granting access to a
+// phone that already has an account elsewhere. Never touches the
+// identity's password: same person, same credentials everywhere.
+func (r *Repository) AttachMembership(ctx context.Context, identityID, tenantID, role, professionalID, customerID string) (domain.User, error) {
+	var membershipID string
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO memberships(identity_id, tenant_id, role, professional_id, customer_id)
+		VALUES($1,$2,$3,$4,$5) RETURNING id`,
+		identityID, tenantID, role, nullable(professionalID), nullable(customerID)).Scan(&membershipID)
+	if _, ok := isUniqueViolation(err); ok {
+		return domain.User{}, domain.ErrConflict
+	}
+	if err != nil {
+		return domain.User{}, err
+	}
+	return r.GetMembershipByID(ctx, membershipID)
+}
+
+// CreateIdentityWithMembership provisions a brand-new person and their
+// first membership together in one transaction: used the first time this
+// platform genuinely sees a given phone/e-mail/social id.
+func (r *Repository) CreateIdentityWithMembership(ctx context.Context, name, email, phone, passwordHash, googleID, facebookID, tenantID, role, professionalID, customerID string) (domain.User, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.User{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var identityID string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO identities(name, email, phone, password_hash, google_id, facebook_id)
+		VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+		name, nullable(email), nullable(phone), nullable(passwordHash), nullable(googleID), nullable(facebookID)).Scan(&identityID)
+	if constraint, ok := isUniqueViolation(err); ok {
+		return domain.User{}, fmt.Errorf("%w: %s", domain.ErrConflict, constraint)
+	}
+	if err != nil {
+		return domain.User{}, err
+	}
+
+	var membershipID string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO memberships(identity_id, tenant_id, role, professional_id, customer_id)
+		VALUES($1,$2,$3,$4,$5) RETURNING id`,
+		identityID, tenantID, role, nullable(professionalID), nullable(customerID)).Scan(&membershipID)
+	if constraint, ok := isUniqueViolation(err); ok {
+		return domain.User{}, fmt.Errorf("%w: %s", domain.ErrConflict, constraint)
+	}
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.User{}, err
+	}
+	return r.GetMembershipByID(ctx, membershipID)
 }
 
 const tenantColumns = `id, name, slug, self_scheduling_enabled, auto_confirm_appointments, active, created_at`
@@ -542,8 +682,9 @@ func (r *Repository) ListTenants(ctx context.Context) ([]domain.Tenant, error) {
 // tenant's own oldest manager account and issue tokens for it, rather than
 // minting a token for a user row that doesn't match its claims.
 func (r *Repository) GetFirstManagerByTenant(ctx context.Context, tenantID string) (domain.User, error) {
-	return r.scanUser(r.db.QueryRow(ctx, `
-		SELECT `+userColumns+` FROM users WHERE tenant_id=$1 AND role='manager' ORDER BY created_at LIMIT 1`, tenantID))
+	return r.scanMembership(r.db.QueryRow(ctx, `
+		SELECT `+membershipColumns+` `+membershipJoin+`
+		WHERE m.tenant_id=$1 AND m.role='manager' ORDER BY m.created_at LIMIT 1`, tenantID))
 }
 
 // TenantNameAvailable backs the real-time name check on the signup form.
@@ -609,13 +750,10 @@ func (r *Repository) CreateTenantWithManager(ctx context.Context, tenantName, sl
 		return domain.Tenant{}, domain.User{}, err
 	}
 
-	manager := domain.User{TenantID: tenant.ID}
+	var identityID string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO users(tenant_id, name, email, password_hash, role)
-		VALUES($1,$2,$3,$4,'manager')
-		RETURNING `+userColumns,
-		tenant.ID, managerName, email, passwordHash).
-		Scan(userScanTargets(&manager)...)
+		INSERT INTO identities(name, email, password_hash) VALUES($1,$2,$3) RETURNING id`,
+		managerName, email, passwordHash).Scan(&identityID)
 	if constraint, ok := isUniqueViolation(err); ok {
 		return domain.Tenant{}, domain.User{}, fmt.Errorf("%w: %s", domain.ErrConflict, constraint)
 	}
@@ -623,7 +761,19 @@ func (r *Repository) CreateTenantWithManager(ctx context.Context, tenantName, sl
 		return domain.Tenant{}, domain.User{}, err
 	}
 
-	return tenant, manager, tx.Commit(ctx)
+	var membershipID string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO memberships(identity_id, tenant_id, role) VALUES($1,$2,'manager') RETURNING id`,
+		identityID, tenant.ID).Scan(&membershipID)
+	if err != nil {
+		return domain.Tenant{}, domain.User{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Tenant{}, domain.User{}, err
+	}
+	manager, err := r.GetMembershipByID(ctx, membershipID)
+	return tenant, manager, err
 }
 
 func nullable(value string) *string {
@@ -633,18 +783,9 @@ func nullable(value string) *string {
 	return &value
 }
 
-func userScanTargets(item *domain.User) []any {
-	return []any{
-		&item.ID, &item.TenantID, &item.Name, &nullString{&item.Email}, &nullString{&item.Phone}, &nullString{&item.PasswordHash},
-		&nullString{&item.GoogleID}, &nullString{&item.FacebookID}, &item.Role,
-		&nullString{&item.ProfessionalID}, &nullString{&item.CustomerID},
-		&item.FailedLoginAttempts, &nullTime{&item.LockedAt}, &item.Active, &item.CreatedAt,
-	}
-}
-
 // nullString/nullTime adapt nullable Postgres columns onto the plain string
-// and time.Time fields domain.User exposes, so callers never juggle
-// sql.NullString themselves.
+// and time.Time fields domain.Identity/domain.User expose, so callers never
+// juggle sql.NullString themselves.
 type nullString struct{ dst *string }
 
 func (n *nullString) Scan(value any) error {
@@ -665,15 +806,6 @@ func (n *nullTime) Scan(value any) error {
 	}
 	*n.dst = wrapped.Time
 	return nil
-}
-
-func (r *Repository) scanUser(row pgx.Row) (domain.User, error) {
-	var item domain.User
-	err := row.Scan(userScanTargets(&item)...)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return item, domain.ErrNotFound
-	}
-	return item, err
 }
 
 func isExclusionViolation(err error) bool {

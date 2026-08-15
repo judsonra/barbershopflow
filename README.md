@@ -17,6 +17,17 @@ make dev
 
 Para encerrar: `make down`. Para executar em produção local: `make prod`.
 
+## Acessos de desenvolvimento
+
+Usuários criados pelas migrações de seed (apenas em dev/demo):
+
+| Papel      | E-mail                     | Senha       |
+| ---------- | -------------------------- | ----------- |
+| Superadmin | `admin@barberflow.local`   | `change-me` |
+| Gestor     | `gestor@barberflow.local`  | `change-me` |
+
+Troque essas senhas imediatamente em qualquer ambiente que não seja local.
+
 ## Comandos
 
 ```bash

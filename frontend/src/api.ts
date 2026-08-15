@@ -1,4 +1,4 @@
-import type { Appointment, Customer, Professional, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
+import type { Appointment, Customer, MembershipOption, Professional, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
 
 const ACCESS_KEY = 'bf_access_token'
 const REFRESH_KEY = 'bf_refresh_token'
@@ -66,16 +66,41 @@ async function tryRefresh(): Promise<boolean> {
 
 // Google/Facebook finish with a full-page redirect back to `/`, carrying the
 // tokens in the URL fragment (never sent to a server, unlike a query string).
-// Call this once on app boot to pick them up.
-function consumeOAuthRedirect(): { error?: string } {
+// Call this once on app boot to pick them up. When the same person is
+// enrolled in more than one barbershop, the server can't mint a token yet —
+// it sends a preauth_token + the list of barbershops to choose from instead
+// (see LoginResult below), same as the JSON login response in that case.
+function consumeOAuthRedirect(): { error?: string; choice?: { preauthToken: string; memberships: MembershipOption[] } } {
   if (!location.hash) return {}
   const params = new URLSearchParams(location.hash.slice(1))
   const accessToken = params.get('access_token')
   const refreshToken = params.get('refresh_token')
+  const preauthToken = params.get('preauth_token')
+  const membershipsParam = params.get('memberships')
   const error = params.get('auth_error')
   if (accessToken && refreshToken) storeTokens(accessToken, refreshToken)
-  if (accessToken || error) history.replaceState(null, '', location.pathname + location.search)
+  if (accessToken || error || preauthToken) history.replaceState(null, '', location.pathname + location.search)
+  if (preauthToken && membershipsParam) {
+    try { return { choice: { preauthToken, memberships: JSON.parse(membershipsParam) } } }
+    catch { /* fall through */ }
+  }
   return { error: error ?? undefined }
+}
+
+// LoginResult mirrors what POST /auth/login can now return: straight to a
+// signed-in user when the identity has exactly one barbershop (unchanged
+// from before), or a list to choose from when it has more than one.
+export type LoginResult = { kind: 'ok'; user: User } | { kind: 'choice'; preauthToken: string; memberships: MembershipOption[] }
+
+async function loginRequest(body: object): Promise<LoginResult> {
+  const data = await request<
+    { access_token: string; refresh_token: string; user: User } | { preauth_token: string; memberships: MembershipOption[] }
+  >('/auth/login', { method: 'POST', body: JSON.stringify(body) })
+  if ('preauth_token' in data) {
+    return { kind: 'choice', preauthToken: data.preauth_token, memberships: data.memberships }
+  }
+  storeTokens(data.access_token, data.refresh_token)
+  return { kind: 'ok', user: data.user }
 }
 
 export const api = {
@@ -83,13 +108,7 @@ export const api = {
   onSessionExpired: (handler: () => void) => { sessionExpiredHandler = handler },
   consumeOAuthRedirect,
   socialLoginUrl: (provider: 'google' | 'facebook') => `/api/v1/auth/${provider}/start`,
-  login: async (email: string, password: string) => {
-    const data = await request<{ access_token: string; refresh_token: string; user: User }>(
-      '/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }
-    )
-    storeTokens(data.access_token, data.refresh_token)
-    return data.user
-  },
+  login: (email: string, password: string) => loginRequest({ email, password }),
   checkTenantName: (name: string) => request<{ available: boolean }>(`/tenants/availability?name=${encodeURIComponent(name)}`),
   createTenant: async (data: { tenant_name: string; slug: string; manager_name: string; email: string; password: string }) => {
     const result = await request<{ access_token: string; refresh_token: string; user: User }>(
@@ -106,9 +125,10 @@ export const api = {
     storeTokens(result.access_token, result.refresh_token)
     return result.user
   },
-  loginByPhone: async (phone: string, password: string) => {
+  loginByPhone: (phone: string, password: string) => loginRequest({ phone, password }),
+  selectMembership: async (preauthToken: string, membershipId: string) => {
     const data = await request<{ access_token: string; refresh_token: string; user: User }>(
-      '/auth/login', { method: 'POST', body: JSON.stringify({ phone, password }) }
+      '/auth/select-membership', { method: 'POST', body: JSON.stringify({ preauth_token: preauthToken, membership_id: membershipId }) }
     )
     storeTokens(data.access_token, data.refresh_token)
     return data.user
@@ -127,9 +147,13 @@ export const api = {
   services: () => request<Service[]>('/services'),
   createService: (data: { name: string; duration_minutes: number; price_cents: number }) =>
     request<Service>('/services', { method: 'POST', body: JSON.stringify(data) }),
+  updateService: (id: string, data: { name: string; duration_minutes: number; price_cents: number; active: boolean }) =>
+    request<Service>(`/services/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   professionals: () => request<Professional[]>('/professionals'),
   createProfessional: (data: { name: string; phone?: string; email?: string; cpf?: string }) =>
     request<Professional>('/professionals', { method: 'POST', body: JSON.stringify(data) }),
+  updateProfessional: (id: string, data: { name: string; phone?: string; email?: string; cpf?: string; active: boolean }) =>
+    request<Professional>(`/professionals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   getSchedule: (professionalId: string) => request<ScheduleEntry[]>(`/professionals/${professionalId}/schedule`),
   setSchedule: (professionalId: string, entries: ScheduleEntry[]) =>
     request<ScheduleEntry[]>(`/professionals/${professionalId}/schedule`, { method: 'PUT', body: JSON.stringify({ entries }) }),
@@ -139,7 +163,10 @@ export const api = {
   deleteTimeOff: (professionalId: string, id: string) =>
     request<{ message: string }>(`/professionals/${professionalId}/time-off/${id}`, { method: 'DELETE' }),
   customers: () => request<Customer[]>('/customers'),
-  createCustomer: (data: Omit<Customer, 'id'>) => request<Customer>('/customers', { method: 'POST', body: JSON.stringify(data) }),
+  createCustomer: (data: { name: string; phone?: string; email?: string }) =>
+    request<Customer>('/customers', { method: 'POST', body: JSON.stringify(data) }),
+  updateCustomer: (id: string, data: { name: string; phone?: string; email?: string; active: boolean }) =>
+    request<Customer>(`/customers/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   appointments: (from: string, to: string) => request<Appointment[]>(`/appointments?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
   createAppointment: (data: object) => request<Appointment>('/appointments', { method: 'POST', body: JSON.stringify(data) }),
   updateStatus: (id: string, status: Appointment['status']) =>
