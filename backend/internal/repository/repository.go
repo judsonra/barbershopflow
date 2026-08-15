@@ -322,6 +322,45 @@ func (r *Repository) SearchCustomersGlobal(ctx context.Context, query string) ([
 	return items, rows.Err()
 }
 
+// RecordImpersonation is the durable half of impersonation logging (the
+// log.Printf in server.impersonateTenant stays too, for local debugging).
+// actorMembershipID is the superadmin's own membership id — the same id
+// already used everywhere else in this API as "who is making this
+// request" (claims.UserID) — so no extra lookup is needed to know who
+// impersonated whom later.
+func (r *Repository) RecordImpersonation(ctx context.Context, actorMembershipID, tenantID string) error {
+	_, err := r.db.Exec(ctx, `INSERT INTO impersonation_audits(actor_membership_id, tenant_id) VALUES($1,$2)`, actorMembershipID, tenantID)
+	return err
+}
+
+// ListImpersonationAudit is superadmin-only: the full impersonation
+// trail, newest first, joined with who did it (via the actor's
+// membership -> identity) and which barbershop was accessed. Capped at
+// 200 rows — a trail to review, not a paginated report.
+func (r *Repository) ListImpersonationAudit(ctx context.Context) ([]domain.ImpersonationAudit, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT a.id, i.name, COALESCE(i.email, ''), a.tenant_id, t.name, t.slug, a.created_at
+		FROM impersonation_audits a
+		JOIN memberships m ON m.id = a.actor_membership_id
+		JOIN identities i ON i.id = m.identity_id
+		JOIN tenants t ON t.id = a.tenant_id
+		ORDER BY a.created_at DESC
+		LIMIT 200`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.ImpersonationAudit{}
+	for rows.Next() {
+		var item domain.ImpersonationAudit
+		if err := rows.Scan(&item.ID, &item.ActorName, &item.ActorEmail, &item.TenantID, &item.TenantName, &item.TenantSlug, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 // ListAppointments returns the tenant's agenda in [from, to). customerID
 // scopes it to a single client's own bookings (see server.listAppointments);
 // professionalID scopes it to a single professional's own agenda. Staff

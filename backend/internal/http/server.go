@@ -26,6 +26,8 @@ type Store interface {
 	UpdateProfessional(ctx context.Context, tenantID, id string, item domain.Professional) (domain.Professional, error)
 	ListCustomers(ctx context.Context, tenantID string) ([]domain.Customer, error)
 	SearchCustomersGlobal(ctx context.Context, query string) ([]domain.AdminCustomerMatch, error)
+	RecordImpersonation(ctx context.Context, actorMembershipID, tenantID string) error
+	ListImpersonationAudit(ctx context.Context) ([]domain.ImpersonationAudit, error)
 	CreateCustomer(ctx context.Context, tenantID string, item domain.Customer) (domain.Customer, error)
 	UpdateCustomer(ctx context.Context, tenantID, id string, item domain.Customer) (domain.Customer, error)
 	GetCustomerByID(ctx context.Context, tenantID, id string) (domain.Customer, error)
@@ -108,6 +110,7 @@ func New(store Store, cfg Config) http.Handler {
 	protected.HandleFunc("GET /api/v1/admin/tenants", s.requireRole(domain.RoleSuperAdmin, s.listTenantsAdmin))
 	protected.HandleFunc("POST /api/v1/admin/tenants/{id}/impersonate", s.requireRole(domain.RoleSuperAdmin, s.impersonateTenant))
 	protected.HandleFunc("GET /api/v1/admin/customers", s.requireRole(domain.RoleSuperAdmin, s.adminSearchCustomers))
+	protected.HandleFunc("GET /api/v1/admin/audit", s.requireRole(domain.RoleSuperAdmin, s.adminListAudit))
 	protected.HandleFunc("GET /api/v1/tenant", s.getTenant)
 	protected.HandleFunc("PATCH /api/v1/tenant", s.requireRole(domain.RoleManager, s.updateTenant))
 	protected.HandleFunc("GET /api/v1/services", s.listServices)
@@ -620,8 +623,21 @@ func (s *server) impersonateTenant(w http.ResponseWriter, r *http.Request) {
 		handleError(w, err)
 		return
 	}
+	// Best-effort: a failed audit write shouldn't block the superadmin
+	// from actually accessing the barbershop, so it's logged, not fatal.
+	if err := s.store.RecordImpersonation(r.Context(), claims.UserID, tenantID); err != nil {
+		log.Printf("impersonation audit: failed to record: %v", err)
+	}
 	log.Printf("superadmin %s impersonating tenant %s as manager %s", claims.UserID, tenantID, manager.ID)
 	s.issueTokens(w, manager)
+}
+
+// adminListAudit is the durable, queryable counterpart to the log.Printf
+// above — every barbershop a superadmin has accessed via impersonate,
+// newest first.
+func (s *server) adminListAudit(w http.ResponseWriter, r *http.Request) {
+	items, err := s.store.ListImpersonationAudit(r.Context())
+	respond(w, items, err)
 }
 
 // getTenant is used by the client app to know whether self-scheduling is
