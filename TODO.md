@@ -31,7 +31,7 @@ atual (backend Go, frontend React/PWA, infra Docker).
 - [ ] Tela de gestão do próprio tenant (trocar nome/slug da barbearia, ver dados da conta)
 - [ ] Página de billing/planos, se o produto for monetizado por barbearia
 - [ ] Auditoria de impersonate além do log simples atual (quem acessou qual barbearia e quando)
-- [ ] Endpoint para promover outro usuário a superadmin (hoje só existe via migração/SQL direto)
+- [x] Endpoint para promover outro usuário a superadmin: `POST /admin/promote {"email"}` acha a identidade e vira o `role` do vínculo dela pra `superadmin`; exige identidade com exatamente um vínculo (`409 ambiguous_identity` se tiver mais de um — resolvido via SQL direto nesse caso raro, como antes)
 
 ## 3. Regras de negócio previstas (fora do MVP atual)
 

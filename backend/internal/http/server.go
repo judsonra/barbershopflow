@@ -50,6 +50,7 @@ type Store interface {
 	FindMembershipByProfessionalID(ctx context.Context, professionalID string) (domain.User, error)
 	ListMembershipsByIdentity(ctx context.Context, identityID string) ([]domain.MembershipOption, error)
 	AttachMembership(ctx context.Context, identityID, tenantID, role, professionalID, customerID string) (domain.User, error)
+	SetMembershipRole(ctx context.Context, membershipID, role string) error
 	CreateIdentityWithMembership(ctx context.Context, name, email, phone, passwordHash, googleID, facebookID, tenantID, role, professionalID, customerID string) (domain.User, error)
 	GetProfessionalByID(ctx context.Context, tenantID, id string) (domain.Professional, error)
 	UpdateProfessionalPhone(ctx context.Context, tenantID, professionalID, phone string) error
@@ -108,6 +109,7 @@ func New(store Store, cfg Config) http.Handler {
 	protected.HandleFunc("GET /api/v1/admin/tenants", s.requireRole(domain.RoleSuperAdmin, s.listTenantsAdmin))
 	protected.HandleFunc("POST /api/v1/admin/tenants/{id}/impersonate", s.requireRole(domain.RoleSuperAdmin, s.impersonateTenant))
 	protected.HandleFunc("GET /api/v1/admin/customers", s.requireRole(domain.RoleSuperAdmin, s.adminSearchCustomers))
+	protected.HandleFunc("POST /api/v1/admin/promote", s.requireRole(domain.RoleSuperAdmin, s.promoteToSuperAdmin))
 	protected.HandleFunc("GET /api/v1/tenant", s.getTenant)
 	protected.HandleFunc("PATCH /api/v1/tenant", s.requireRole(domain.RoleManager, s.updateTenant))
 	protected.HandleFunc("GET /api/v1/services", s.listServices)
@@ -605,6 +607,55 @@ func (s *server) adminSearchCustomers(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := s.store.SearchCustomersGlobal(r.Context(), query)
 	respond(w, items, err)
+}
+
+// promoteToSuperAdmin replaces the direct-SQL promotion this project used
+// until now (see TODO.md): finds the identity by e-mail and flips its one
+// membership to role=superadmin. Requires exactly one membership — with
+// more than one (e.g. a client with accounts in two barbershops), which
+// one should become the (tenant-agnostic) superadmin row is ambiguous, so
+// this bails out with 409 rather than guessing; still fixable by hand via
+// SQL, same as every promotion before this endpoint existed.
+func (s *server) promoteToSuperAdmin(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email string `json:"email"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	email := strings.TrimSpace(body.Email)
+	if email == "" {
+		writeError(w, http.StatusBadRequest, "validation_error", "e-mail é obrigatório")
+		return
+	}
+	identity, err := s.store.FindIdentityByEmail(r.Context(), email)
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "nenhuma identidade encontrada com esse e-mail")
+		return
+	}
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	memberships, err := s.store.ListMembershipsByIdentity(r.Context(), identity.ID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	if len(memberships) == 0 {
+		writeError(w, http.StatusNotFound, "not_found", "identidade sem nenhum vínculo ativo pra promover")
+		return
+	}
+	if len(memberships) > 1 {
+		writeError(w, http.StatusConflict, "ambiguous_identity", "identidade tem vínculo em mais de uma barbearia; promova via SQL direto informando qual membership")
+		return
+	}
+	if err := s.store.SetMembershipRole(r.Context(), memberships[0].MembershipID, domain.RoleSuperAdmin); err != nil {
+		handleError(w, err)
+		return
+	}
+	user, err := s.store.GetMembershipByID(r.Context(), memberships[0].MembershipID)
+	respond(w, user, err)
 }
 
 // impersonateTenant is how a superadmin "accesses" a barbershop: rather

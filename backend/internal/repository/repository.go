@@ -643,6 +643,20 @@ func (r *Repository) AttachMembership(ctx context.Context, identityID, tenantID,
 	return r.GetMembershipByID(ctx, membershipID)
 }
 
+// SetMembershipRole is used only by the superadmin promotion endpoint
+// (POST /admin/promote) — every other membership gets its role at
+// creation and never changes it afterwards.
+func (r *Repository) SetMembershipRole(ctx context.Context, membershipID, role string) error {
+	tag, err := r.db.Exec(ctx, `UPDATE memberships SET role=$2 WHERE id=$1`, membershipID, role)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 // CreateIdentityWithMembership provisions a brand-new person and their
 // first membership together in one transaction: used the first time this
 // platform genuinely sees a given phone/e-mail/social id.
