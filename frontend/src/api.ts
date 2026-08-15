@@ -1,4 +1,4 @@
-import type { Appointment, Customer, MembershipOption, Professional, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
+import type { AdminCustomerMatch, Appointment, Customer, MembershipOption, Professional, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
 
 const ACCESS_KEY = 'bf_access_token'
 const REFRESH_KEY = 'bf_refresh_token'
@@ -118,6 +118,7 @@ export const api = {
     return result.user
   },
   listTenantsAdmin: () => request<Tenant[]>('/admin/tenants'),
+  searchCustomersAdmin: (query: string) => request<AdminCustomerMatch[]>(`/admin/customers?q=${encodeURIComponent(query)}`),
   impersonateTenant: async (tenantId: string) => {
     const result = await request<{ access_token: string; refresh_token: string; user: User }>(
       `/admin/tenants/${tenantId}/impersonate`, { method: 'POST' }

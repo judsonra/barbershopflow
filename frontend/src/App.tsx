@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './api'
 import { downloadICS, googleCalendarUrl } from './calendar'
 import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
-import type { Appointment, Customer, MembershipOption, Professional, Service, Tenant, TimeOff, User } from './types'
+import type { AdminCustomerMatch, Appointment, Customer, MembershipOption, Professional, Service, Tenant, TimeOff, User } from './types'
 
 function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : 'Erro inesperado'
@@ -45,10 +45,13 @@ export default function App() {
 // docs/api.md). Logging back out returns to this same login; to switch
 // back to the admin view, log in again with the superadmin account.
 function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersonate: (user: User) => void; onLogout: () => void }) {
-  const [view, setView] = useState<'tenants' | 'profile'>('tenants')
+  const [view, setView] = useState<'tenants' | 'customers' | 'profile'>('tenants')
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [customerQuery, setCustomerQuery] = useState('')
+  const [customerResults, setCustomerResults] = useState<AdminCustomerMatch[]>([])
+  const [searching, setSearching] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -59,6 +62,20 @@ function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersona
 
   useEffect(() => { void load() }, [load])
 
+  // Search-as-you-type, same 400ms debounce as the tenant-name check on
+  // signup — an empty query just clears the results instead of round-tripping.
+  useEffect(() => {
+    const query = customerQuery.trim()
+    if (!query) { setCustomerResults([]); setSearching(false); return }
+    setSearching(true)
+    const timeout = setTimeout(async () => {
+      try { setCustomerResults(await api.searchCustomersAdmin(query)) }
+      catch (err) { setError(errorMessage(err)) }
+      finally { setSearching(false) }
+    }, 400)
+    return () => clearTimeout(timeout)
+  }, [customerQuery])
+
   async function access(tenantId: string) {
     setError('')
     try { onImpersonate(await api.impersonateTenant(tenantId)) }
@@ -67,11 +84,13 @@ function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersona
 
   return <div className="app-shell">
     <header>
-      <div><span className="eyebrow">SUPERADMIN</span><h1>Barbearias</h1></div>
+      <div><span className="eyebrow">SUPERADMIN</span><h1>{view === 'customers' ? 'Clientes' : 'Barbearias'}</h1></div>
       <button className="avatar" title={`${user.name} · Perfil`} onClick={() => setView('profile')}>{user.name.slice(0, 2).toUpperCase()}</button>
     </header>
     <main>
-      {view === 'profile' ? <Profile user={user} onLogout={onLogout} onBack={() => setView('tenants')} /> : <>
+      {view === 'profile' && <Profile user={user} onLogout={onLogout} onBack={() => setView('tenants')} />}
+
+      {view === 'tenants' && <>
         {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
         {loading ? <div className="empty">Carregando…</div> :
           tenants.length === 0 ? <div className="empty"><span>🏠</span><h2>Nenhuma barbearia</h2></div> :
@@ -80,7 +99,25 @@ function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersona
             <button onClick={() => void access(t.id)}>Acessar como gestor</button>
           </li>)}</ul>}
       </>}
+
+      {view === 'customers' && <>
+        {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
+        <label>Buscar por nome, celular ou e-mail
+          <input value={customerQuery} onChange={e => setCustomerQuery(e.target.value)} placeholder="Ex: Maria, (11) 99999-0000…" autoFocus />
+        </label>
+        {searching ? <div className="empty">Buscando…</div> :
+          !customerQuery.trim() ? <div className="empty"><span>🔎</span><p>Digite pra buscar clientes em todas as barbearias.</p></div> :
+          customerResults.length === 0 ? <div className="empty"><span>🔎</span><h2>Nenhum cliente encontrado</h2></div> :
+          <ul className="tenant-list">{customerResults.map(c => <li key={c.id}>
+            <div><b>{c.name}</b><small>{c.tenant_name}{c.phone ? ` · ${c.phone}` : ''}{c.email ? ` · ${c.email}` : ''}{!c.active ? ' · inativo' : ''}</small></div>
+            <button onClick={() => void access(c.tenant_id)}>Acessar como gestor</button>
+          </li>)}</ul>}
+      </>}
     </main>
+    {view !== 'profile' && <nav>
+      <button className={view === 'tenants' ? 'active' : ''} onClick={() => setView('tenants')}><span>🏠</span>Barbearias</button>
+      <button className={view === 'customers' ? 'active' : ''} onClick={() => setView('customers')}><span>🔎</span>Clientes</button>
+    </nav>}
   </div>
 }
 

@@ -56,4 +56,12 @@ describe('api client', () => {
     await expect(api.updateCustomer('1', { name: 'Maria', active: false })).resolves.toEqual(body)
     expect(fetch).toHaveBeenCalledWith('/api/v1/customers/1', expect.objectContaining({ method: 'PATCH' }))
   })
+
+  it('searches customers across tenants with the query URL-encoded', async () => {
+    const body = [{ id: '1', name: 'Maria', active: true, tenant_id: 't1', tenant_name: 'Barbearia A', tenant_slug: 'barbearia-a' }]
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 })))
+
+    await expect(api.searchCustomersAdmin('(11) 9')).resolves.toEqual(body)
+    expect(fetch).toHaveBeenCalledWith('/api/v1/admin/customers?q=(11)%209', expect.any(Object))
+  })
 })

@@ -12,6 +12,7 @@ export type Professional = { id: string; name: string; phone?: string; email?: s
 export type ScheduleEntry = { weekday: number; start_minute: number; end_minute: number }
 export type TimeOff = { id: string; professional_id: string; starts_at: string; ends_at: string; reason?: string }
 export type Customer = { id: string; name: string; phone?: string; email?: string; active: boolean }
+export type AdminCustomerMatch = Customer & { tenant_id: string; tenant_name: string; tenant_slug: string }
 export type Appointment = {
   id: string; customer_id: string; customer_name: string; professional_id: string;
   professional_name: string; service_id: string; service_name: string; starts_at: string;

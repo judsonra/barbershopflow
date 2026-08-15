@@ -204,6 +204,16 @@ type Customer struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// AdminCustomerMatch is one row of the superadmin's global customer search
+// (GET /admin/customers?q=): a customer plus which barbershop they belong
+// to, so a match can be found without impersonating tenant by tenant.
+type AdminCustomerMatch struct {
+	Customer
+	TenantID   string `json:"tenant_id"`
+	TenantName string `json:"tenant_name"`
+	TenantSlug string `json:"tenant_slug"`
+}
+
 type Appointment struct {
 	ID               string    `json:"id"`
 	CustomerID       string    `json:"customer_id"`

@@ -25,6 +25,7 @@ type Store interface {
 	CreateProfessional(ctx context.Context, tenantID string, item domain.Professional) (domain.Professional, error)
 	UpdateProfessional(ctx context.Context, tenantID, id string, item domain.Professional) (domain.Professional, error)
 	ListCustomers(ctx context.Context, tenantID string) ([]domain.Customer, error)
+	SearchCustomersGlobal(ctx context.Context, query string) ([]domain.AdminCustomerMatch, error)
 	CreateCustomer(ctx context.Context, tenantID string, item domain.Customer) (domain.Customer, error)
 	UpdateCustomer(ctx context.Context, tenantID, id string, item domain.Customer) (domain.Customer, error)
 	GetCustomerByID(ctx context.Context, tenantID, id string) (domain.Customer, error)
@@ -106,6 +107,7 @@ func New(store Store, cfg Config) http.Handler {
 	protected.HandleFunc("GET /api/v1/auth/me", s.me)
 	protected.HandleFunc("GET /api/v1/admin/tenants", s.requireRole(domain.RoleSuperAdmin, s.listTenantsAdmin))
 	protected.HandleFunc("POST /api/v1/admin/tenants/{id}/impersonate", s.requireRole(domain.RoleSuperAdmin, s.impersonateTenant))
+	protected.HandleFunc("GET /api/v1/admin/customers", s.requireRole(domain.RoleSuperAdmin, s.adminSearchCustomers))
 	protected.HandleFunc("GET /api/v1/tenant", s.getTenant)
 	protected.HandleFunc("PATCH /api/v1/tenant", s.requireRole(domain.RoleManager, s.updateTenant))
 	protected.HandleFunc("GET /api/v1/services", s.listServices)
@@ -588,6 +590,20 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) listTenantsAdmin(w http.ResponseWriter, r *http.Request) {
 	items, err := s.store.ListTenants(r.Context())
+	respond(w, items, err)
+}
+
+// adminSearchCustomers lets a superadmin find a customer by name/phone/
+// e-mail across every barbershop, without impersonating tenant by tenant
+// first. An empty query returns no rows rather than dumping every customer
+// on the platform.
+func (s *server) adminSearchCustomers(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		writeJSON(w, http.StatusOK, []domain.AdminCustomerMatch{})
+		return
+	}
+	items, err := s.store.SearchCustomersGlobal(r.Context(), query)
 	respond(w, items, err)
 }
 

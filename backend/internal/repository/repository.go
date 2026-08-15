@@ -293,6 +293,35 @@ func (r *Repository) UpdateCustomerPhone(ctx context.Context, tenantID, customer
 	return nil
 }
 
+// SearchCustomersGlobal is superadmin-only: finds customers by name, phone
+// or e-mail across every barbershop, so a specific person can be located
+// without impersonating tenant by tenant (see ListTenants for the same
+// "deliberately unscoped" carve-out). Capped at 50 rows since it's a
+// lookup aid, not a report.
+func (r *Repository) SearchCustomersGlobal(ctx context.Context, query string) ([]domain.AdminCustomerMatch, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT c.id, c.name, c.phone, c.email, c.active, c.created_at, t.id, t.name, t.slug
+		FROM customers c
+		JOIN tenants t ON t.id = c.tenant_id
+		WHERE c.name ILIKE '%'||$1||'%' OR c.phone ILIKE '%'||$1||'%' OR c.email ILIKE '%'||$1||'%'
+		ORDER BY c.name
+		LIMIT 50`, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.AdminCustomerMatch{}
+	for rows.Next() {
+		var item domain.AdminCustomerMatch
+		if err := rows.Scan(&item.ID, &item.Name, &item.Phone, &item.Email, &item.Active, &item.CreatedAt,
+			&item.TenantID, &item.TenantName, &item.TenantSlug); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 // ListAppointments returns the tenant's agenda in [from, to). customerID
 // scopes it to a single client's own bookings (see server.listAppointments);
 // professionalID scopes it to a single professional's own agenda. Staff

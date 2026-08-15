@@ -91,6 +91,7 @@ senha quando a identidade é realmente nova.
 | PATCH | `/tenant` | Liga/desliga autoagendamento e auto-confirmação | `manager` |
 | GET | `/admin/tenants` | Lista todas as barbearias da plataforma | `superadmin` |
 | POST | `/admin/tenants/{id}/impersonate` | Vira o gestor daquela barbearia (novo access/refresh token) | `superadmin` |
+| GET | `/admin/customers?q=` | Busca clientes por nome/celular/e-mail em todas as barbearias | `superadmin` |
 | GET | `/appointments?from=&to=` | Lista agenda no período (`client` só vê os próprios; `professional` só vê os da própria agenda) | qualquer papel |
 | POST | `/appointments` | Cria agendamento; `client` só se autoagendamento estiver ligado, ver "Autoagendamento" | qualquer papel |
 | PATCH | `/appointments/{id}/status` | Altera estado | `manager`/`professional` (profissional só no próprio agendamento); `client` não pode |
@@ -174,6 +175,17 @@ Isso significa que uma barbearia sem nenhum gestor não pode ser
 impersonada — `impersonate` responde `404`. Toda barbearia criada via
 `POST /tenants` já vem com um gestor por construção, então isso só seria um
 problema em caso de remoção manual de dados.
+
+A única exceção deliberada ao isolamento por tenant é `GET
+/admin/customers?q=`: busca clientes por nome, celular ou e-mail (`ILIKE`,
+case-insensitive) em **todas** as barbearias de uma vez, retornando também
+`tenant_id`/`tenant_name`/`tenant_slug` de cada resultado — serve pra achar
+rápido em qual barbearia um cliente específico está cadastrado, sem
+precisar impersonar barbearia por barbearia. `q` vazio devolve lista vazia
+em vez de despejar a base inteira; resultado limitado a 50 linhas (é um
+atalho de busca, não um relatório). Não devolve dado de negócio (serviços,
+profissionais, agendamentos) de nenhuma barbearia — pra isso, ainda é
+preciso impersonar.
 
 ## Autoagendamento
 
