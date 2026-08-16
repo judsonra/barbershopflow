@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './api'
 import { downloadICS, googleCalendarUrl } from './calendar'
 import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
-import type { AdminCustomerMatch, Appointment, Customer, MembershipOption, Professional, Service, Tenant, TimeOff, User } from './types'
+import type { AdminCustomerMatch, Appointment, Customer, MembershipOption, Professional, ProfessionalService, Service, Tenant, TimeOff, User } from './types'
 
 function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : 'Erro inesperado'
@@ -399,7 +399,7 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
         {configView === 'agenda' && <TenantConfig tenant={tenant} onSaved={t => setTenant(t)} onBack={() => setConfigView('menu')} />}
         {configView === 'services' && <ServicesManager services={services} onCreated={s => setServices(v => [...v, s])}
           onUpdated={s => setServices(v => v.map(x => x.id === s.id ? s : x))} onBack={() => setConfigView('menu')} />}
-        {configView === 'professionals' && <ProfessionalsManager professionals={professionals} onCreated={p => setProfessionals(v => [...v, p])}
+        {configView === 'professionals' && <ProfessionalsManager professionals={professionals} services={services} onCreated={p => setProfessionals(v => [...v, p])}
           onUpdated={p => setProfessionals(v => v.map(x => x.id === p.id ? p : x))} onBack={() => setConfigView('menu')} />}
         {configView === 'clients' && <ClientsManager customers={customers} onCreated={c => setCustomers(v => [...v, c])}
           onUpdated={c => setCustomers(v => v.map(x => x.id === c.id ? c : x))} onBack={() => setConfigView('menu')} />}
@@ -578,7 +578,9 @@ function ServicesManager({ services, onCreated, onUpdated, onBack }: { services:
 
 type ProfessionalScreen = { name: 'list' } | { name: 'detail'; id: string } | { name: 'edit'; id: string } | { name: 'create' }
 
-function ProfessionalsManager({ professionals, onCreated, onUpdated, onBack }: { professionals: Professional[]; onCreated: (professional: Professional) => void; onUpdated: (professional: Professional) => void; onBack: () => void }) {
+type SpecialtyEntry = { enabled: boolean; price: string; duration: string }
+
+function ProfessionalsManager({ professionals, services, onCreated, onUpdated, onBack }: { professionals: Professional[]; services: Service[]; onCreated: (professional: Professional) => void; onUpdated: (professional: Professional) => void; onBack: () => void }) {
   const [screen, setScreen] = useState<ProfessionalScreen>({ name: 'list' })
   const [name, setName] = useState(''); const [phone, setPhone] = useState('')
   const [email, setEmail] = useState(''); const [cpf, setCpf] = useState('')
@@ -591,6 +593,68 @@ function ProfessionalsManager({ professionals, onCreated, onUpdated, onBack }: {
   const [grantPhone, setGrantPhone] = useState('')
   const [grantMessage, setGrantMessage] = useState('')
   const [grantSaving, setGrantSaving] = useState(false)
+  const [specialtiesOpen, setSpecialtiesOpen] = useState(false)
+  const [specialtiesLoading, setSpecialtiesLoading] = useState(false)
+  const [specialtiesSaving, setSpecialtiesSaving] = useState(false)
+  const [specialtiesError, setSpecialtiesError] = useState('')
+  const [specialtiesEntries, setSpecialtiesEntries] = useState<Record<string, SpecialtyEntry>>({})
+
+  async function startSpecialties(professional: Professional) {
+    setSpecialtiesOpen(true); setSpecialtiesError(''); setSpecialtiesLoading(true)
+    try {
+      const current = await api.getProfessionalServices(professional.id)
+      const byServiceId = new Map(current.map(item => [item.service_id, item]))
+      const entries: Record<string, SpecialtyEntry> = {}
+      for (const service of services) {
+        const existing = byServiceId.get(service.id)
+        entries[service.id] = {
+          enabled: !!existing,
+          price: existing?.price_cents_override != null ? (existing.price_cents_override / 100).toFixed(2).replace('.', ',') : '',
+          duration: existing?.duration_minutes_override != null ? String(existing.duration_minutes_override) : '',
+        }
+      }
+      setSpecialtiesEntries(entries)
+    }
+    catch (err) { setSpecialtiesError(errorMessage(err)) }
+    finally { setSpecialtiesLoading(false) }
+  }
+
+  async function submitSpecialties(event: FormEvent) {
+    event.preventDefault()
+    if (screen.name !== 'detail') return
+    setSpecialtiesError('')
+    const entries: ProfessionalService[] = []
+    for (const service of services) {
+      const entry = specialtiesEntries[service.id]
+      if (!entry?.enabled) continue
+      let priceCentsOverride: number | null = null
+      if (entry.price.trim()) {
+        priceCentsOverride = Math.round(Number(entry.price.replace(',', '.')) * 100)
+        if (!Number.isFinite(priceCentsOverride) || priceCentsOverride < 0) {
+          setSpecialtiesError(`Preço inválido para "${service.name}".`); return
+        }
+      }
+      let durationMinutesOverride: number | null = null
+      if (entry.duration.trim()) {
+        durationMinutesOverride = Number(entry.duration)
+        if (!Number.isFinite(durationMinutesOverride) || durationMinutesOverride <= 0) {
+          setSpecialtiesError(`Duração inválida para "${service.name}".`); return
+        }
+      }
+      entries.push({ service_id: service.id, price_cents_override: priceCentsOverride, duration_minutes_override: durationMinutesOverride })
+    }
+    setSpecialtiesSaving(true)
+    try {
+      await api.setProfessionalServices(screen.id, entries)
+      setSpecialtiesOpen(false)
+    }
+    catch (err) { setSpecialtiesError(errorMessage(err)) }
+    finally { setSpecialtiesSaving(false) }
+  }
+
+  function updateSpecialty(serviceId: string, patch: Partial<SpecialtyEntry>) {
+    setSpecialtiesEntries(v => ({ ...v, [serviceId]: { ...v[serviceId], ...patch } }))
+  }
 
   function startCreate() {
     setName(''); setPhone(''); setEmail(''); setCpf(''); setError('')
@@ -688,6 +752,7 @@ function ProfessionalsManager({ professionals, onCreated, onUpdated, onBack }: {
           {togglingId === detailProfessional.id ? 'Salvando…' : detailProfessional.active ? 'Excluir' : 'Reativar'}
         </button>
         <button type="button" onClick={() => startGrant(detailProfessional)}>Conceder acesso</button>
+        <button type="button" onClick={() => startSpecialties(detailProfessional)}>Especialidades e preços</button>
       </div>
       {granting && <form onSubmit={submitGrant} className="quick">
         <p>Enviar senha de acesso ao app para <b>{detailProfessional.name}</b> por SMS/WhatsApp:</p>
@@ -696,7 +761,26 @@ function ProfessionalsManager({ professionals, onCreated, onUpdated, onBack }: {
         <button disabled={grantSaving}>{grantSaving ? 'Enviando…' : 'Enviar senha'}</button>
         <button type="button" onClick={() => setGranting(false)}>Fechar</button>
       </form>}
-      <button type="button" className="link-button" onClick={() => { setGranting(false); setScreen({ name: 'list' }) }}>Voltar</button>
+      {specialtiesOpen && <form onSubmit={submitSpecialties} className="quick">
+        <p>Serviços que <b>{detailProfessional.name}</b> pode realizar. Sem nenhum marcado, executa qualquer serviço ativo com preço/duração padrão.</p>
+        {specialtiesError && <div className="alert">{specialtiesError}</div>}
+        {specialtiesLoading ? <p>Carregando…</p> : services.map(service => {
+          const entry = specialtiesEntries[service.id] ?? { enabled: false, price: '', duration: '' }
+          return <div key={service.id} className="specialty-row">
+            <label>
+              <input type="checkbox" checked={entry.enabled} onChange={e => updateSpecialty(service.id, { enabled: e.target.checked })} />
+              {' '}{service.name} <small>({service.duration_minutes} min · {money.format(service.price_cents / 100)})</small>
+            </label>
+            {entry.enabled && <div className="specialty-overrides">
+              <input type="text" inputMode="decimal" placeholder="Preço (R$, opcional)" value={entry.price} onChange={e => updateSpecialty(service.id, { price: e.target.value })} />
+              <input type="number" min={5} max={480} placeholder="Duração (min, opcional)" value={entry.duration} onChange={e => updateSpecialty(service.id, { duration: e.target.value })} />
+            </div>}
+          </div>
+        })}
+        <button disabled={specialtiesSaving || specialtiesLoading}>{specialtiesSaving ? 'Salvando…' : 'Salvar especialidades'}</button>
+        <button type="button" onClick={() => setSpecialtiesOpen(false)}>Fechar</button>
+      </form>}
+      <button type="button" className="link-button" onClick={() => { setGranting(false); setSpecialtiesOpen(false); setScreen({ name: 'list' }) }}>Voltar</button>
     </>}
 
     {screen.name === 'edit' && <form onSubmit={submitEdit} className="quick">

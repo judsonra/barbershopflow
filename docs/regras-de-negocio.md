@@ -73,8 +73,16 @@ acesso a redes confiáveis.
 1. Todo profissional tem nome e pode estar ativo ou inativo.
 2. Profissionais inativos permanecem no histórico, mas não recebem novos
    agendamentos.
-3. Neste MVP, qualquer profissional ativo pode executar qualquer serviço ativo.
-   Uma tabela de especialidades é uma evolução prevista.
+3. Especialidades (`professional_services`, `GET`/`PUT
+   /professionals/{id}/services`): profissional sem nenhuma especialidade
+   cadastrada pode executar qualquer serviço ativo, com o preço/duração
+   padrão do serviço (retrocompatível com profissionais criados antes dessa
+   tabela existir). A partir da primeira especialidade cadastrada, o
+   profissional só pode ser agendado para os serviços marcados (`409
+   service_not_offered` para os demais); cada especialidade pode opcionalmente
+   sobrescrever o preço e/ou a duração daquele serviço só para aquele
+   profissional. Só o gestor define especialidades e preços (não é
+   autoatendido pelo profissional, ao contrário da jornada de trabalho).
 
 ### Jornada de trabalho e bloqueios
 
@@ -146,7 +154,6 @@ Cada barbearia liga essas duas configurações independentemente (`GET`/`PATCH
 ## Fora do MVP, mas previsto
 
 - Jornada de trabalho, bloqueios, folgas e feriados.
-- Especialidades por profissional e preços/durações customizados.
 - Lembretes por WhatsApp/e-mail.
 - Sinal, pagamentos, caixa, comissões, cupons e programa de fidelidade.
 - Política configurável de cancelamento e no-show.

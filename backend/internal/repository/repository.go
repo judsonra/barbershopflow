@@ -233,6 +233,65 @@ func (r *Repository) DeleteTimeOff(ctx context.Context, tenantID, professionalID
 	return nil
 }
 
+func (r *Repository) ListProfessionalServices(ctx context.Context, tenantID, professionalID string) ([]domain.ProfessionalService, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT service_id, price_cents_override, duration_minutes_override FROM professional_services
+		WHERE tenant_id=$1 AND professional_id=$2 ORDER BY service_id`, tenantID, professionalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.ProfessionalService{}
+	for rows.Next() {
+		var item domain.ProfessionalService
+		if err := rows.Scan(&item.ServiceID, &item.PriceCentsOverride, &item.DurationMinutesOverride); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// SetProfessionalServices replaces the professional's whole set of
+// specialties in one go, mirroring SetProfessionalSchedule - the caller
+// (server.setProfessionalServices) always sends the full set.
+func (r *Repository) SetProfessionalServices(ctx context.Context, tenantID, professionalID string, entries []domain.ProfessionalService) ([]domain.ProfessionalService, error) {
+	exists, err := r.professionalExists(ctx, tenantID, professionalID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, domain.ErrNotFound
+	}
+
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `DELETE FROM professional_services WHERE tenant_id=$1 AND professional_id=$2`, tenantID, professionalID); err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		var serviceExists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM services WHERE id=$1 AND tenant_id=$2)`, entry.ServiceID, tenantID).Scan(&serviceExists); err != nil {
+			return nil, err
+		}
+		if !serviceExists {
+			return nil, domain.ErrNotFound
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO professional_services(tenant_id, professional_id, service_id, price_cents_override, duration_minutes_override) VALUES($1,$2,$3,$4,$5)`,
+			tenantID, professionalID, entry.ServiceID, entry.PriceCentsOverride, entry.DurationMinutesOverride); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
 func (r *Repository) ListCustomers(ctx context.Context, tenantID string) ([]domain.Customer, error) {
 	rows, err := r.db.Query(ctx, `SELECT id, name, phone, email, active, created_at FROM customers WHERE tenant_id=$1 ORDER BY name`, tenantID)
 	if err != nil {
@@ -392,6 +451,30 @@ func (r *Repository) CreateAppointment(ctx context.Context, tenantID, status str
 	}
 	if !serviceActive || !professionalActive {
 		return item, fmt.Errorf("service and professional must be active")
+	}
+
+	var overridePrice sql.NullInt64
+	var overrideDuration sql.NullInt32
+	err = tx.QueryRow(ctx, `SELECT price_cents_override, duration_minutes_override FROM professional_services WHERE tenant_id=$1 AND professional_id=$2 AND service_id=$3 FOR SHARE`,
+		tenantID, item.ProfessionalID, item.ServiceID).Scan(&overridePrice, &overrideDuration)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		var hasSpecialties bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM professional_services WHERE tenant_id=$1 AND professional_id=$2)`, tenantID, item.ProfessionalID).Scan(&hasSpecialties); err != nil {
+			return item, err
+		}
+		if hasSpecialties {
+			return item, domain.ErrServiceNotOffered
+		}
+	case err != nil:
+		return item, err
+	default:
+		if overrideDuration.Valid {
+			duration = int(overrideDuration.Int32)
+		}
+		if overridePrice.Valid {
+			item.PriceCents = overridePrice.Int64
+		}
 	}
 
 	item.EndsAt = item.StartsAt.Add(time.Duration(duration) * time.Minute)

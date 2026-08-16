@@ -15,6 +15,7 @@ var (
 	ErrConflict            = errors.New("already in use")
 	ErrOutsideWorkingHours = errors.New("requested time is outside the professional's working hours")
 	ErrTimeBlocked         = errors.New("requested time overlaps a blocked period")
+	ErrServiceNotOffered   = errors.New("professional does not perform this service")
 )
 
 type Tenant struct {
@@ -193,6 +194,20 @@ type TimeOff struct {
 	EndsAt         time.Time `json:"ends_at"`
 	Reason         string    `json:"reason,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
+}
+
+// ProfessionalService is one service a professional is allowed to perform,
+// with optional price/duration overrides. A professional with no entries at
+// all has no restriction (backward compatible with professionals created
+// before this feature): any active service can be booked for them, using
+// the service's own price/duration. Once at least one entry exists, only
+// the listed services can be booked for that professional, and an override
+// (when present) replaces the service's default price/duration for that
+// pairing.
+type ProfessionalService struct {
+	ServiceID               string `json:"service_id"`
+	PriceCentsOverride      *int64 `json:"price_cents_override,omitempty"`
+	DurationMinutesOverride *int   `json:"duration_minutes_override,omitempty"`
 }
 
 type Customer struct {
