@@ -36,6 +36,10 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
-    globals: false
+    globals: false,
+    // Vitest's default include glob also matches e2e/*.spec.ts, but those
+    // use @playwright/test's test/expect (run via `npm run test:e2e`), not
+    // vitest's - keep this to src/ so the two suites don't collide.
+    include: ['src/**/*.test.{ts,tsx}']
   }
 })

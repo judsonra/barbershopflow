@@ -6,3 +6,6 @@ coverage/
 *.log
 backend/bin/
 *.tsbuildinfo
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
