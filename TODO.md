@@ -31,7 +31,7 @@ atual (backend Go, frontend React/PWA, infra Docker).
 - [x] Tela de gestão do próprio tenant: seção "Barbearia" no Config permite trocar nome/slug (`PATCH /tenant` virou full-replace, mesmo contrato dos outros PATCH) e mostra status/data de criação da conta; checagem de nome duplicado em tempo real reaproveitando `GET /tenants/availability?name=`, sem falso-positivo contra o próprio nome atual
 - [ ] Página de billing/planos, se o produto for monetizado por barbearia
 - [ ] Auditoria de impersonate além do log simples atual (quem acessou qual barbearia e quando)
-- [ ] Endpoint para promover outro usuário a superadmin (hoje só existe via migração/SQL direto)
+- [x] Endpoint para promover outro usuário a superadmin: `POST /admin/promote {"email"}` acha a identidade e vira o `role` do vínculo dela pra `superadmin`; exige identidade com exatamente um vínculo (`409 ambiguous_identity` se tiver mais de um — resolvido via SQL direto nesse caso raro, como antes)
 
 ## 3. Regras de negócio previstas (fora do MVP atual)
 

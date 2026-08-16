@@ -92,6 +92,7 @@ senha quando a identidade é realmente nova.
 | GET | `/admin/tenants` | Lista todas as barbearias da plataforma | `superadmin` |
 | POST | `/admin/tenants/{id}/impersonate` | Vira o gestor daquela barbearia (novo access/refresh token) | `superadmin` |
 | GET | `/admin/customers?q=` | Busca clientes por nome/celular/e-mail em todas as barbearias | `superadmin` |
+| POST | `/admin/promote` | Promove outra identidade a `superadmin` pelo e-mail | `superadmin` |
 | GET | `/appointments?from=&to=` | Lista agenda no período (`client` só vê os próprios; `professional` só vê os da própria agenda) | qualquer papel |
 | POST | `/appointments` | Cria agendamento; `client` só se autoagendamento estiver ligado, ver "Autoagendamento" | qualquer papel |
 | PATCH | `/appointments/{id}/status` | Altera estado | `manager`/`professional` (profissional só no próprio agendamento); `client` não pode |
@@ -186,6 +187,18 @@ em vez de despejar a base inteira; resultado limitado a 50 linhas (é um
 atalho de busca, não um relatório). Não devolve dado de negócio (serviços,
 profissionais, agendamentos) de nenhuma barbearia — pra isso, ainda é
 preciso impersonar.
+
+`POST /admin/promote` com `{"email": "..."}` substitui a promoção manual
+via SQL direto que era a única forma de criar um superadmin até agora:
+acha a identidade pelo e-mail e vira o `role` do vínculo (`membership`)
+dela pra `superadmin`. Exige que a identidade tenha **exatamente um**
+vínculo — com mais de um (ex: um cliente com conta em duas barbearias),
+não dá pra saber qual barbearia deveria virar o vínculo (tenant-agnóstico,
+na prática) do novo superadmin, então a API responde `409
+ambiguous_identity` em vez de chutar; ainda dá pra resolver via SQL direto
+nesse caso, como antes desse endpoint existir. `404` se o e-mail não
+corresponder a nenhuma identidade, ou se a identidade não tiver nenhum
+vínculo ativo.
 
 ## Autoagendamento
 
