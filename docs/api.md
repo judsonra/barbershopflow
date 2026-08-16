@@ -93,6 +93,7 @@ senha quando a identidade é realmente nova.
 | POST | `/admin/tenants/{id}/impersonate` | Vira o gestor daquela barbearia (novo access/refresh token) | `superadmin` |
 | GET | `/admin/customers?q=` | Busca clientes por nome/celular/e-mail em todas as barbearias | `superadmin` |
 | POST | `/admin/promote` | Promove outra identidade a `superadmin` pelo e-mail | `superadmin` |
+| GET | `/admin/audit` | Trilha de auditoria de impersonate (quem, qual barbearia, quando) | `superadmin` |
 | GET | `/appointments?from=&to=` | Lista agenda no período (`client` só vê os próprios; `professional` só vê os da própria agenda) | qualquer papel |
 | POST | `/appointments` | Cria agendamento; `client` só se autoagendamento estiver ligado, ver "Autoagendamento" | qualquer papel |
 | PATCH | `/appointments/{id}/status` | Altera estado | `manager`/`professional` (profissional só no próprio agendamento); `client` não pode |
@@ -177,6 +178,15 @@ Isso significa que uma barbearia sem nenhum gestor não pode ser
 impersonada — `impersonate` responde `404`. Toda barbearia criada via
 `POST /tenants` já vem com um gestor por construção, então isso só seria um
 problema em caso de remoção manual de dados.
+
+Todo `impersonate` bem-sucedido grava uma linha em `impersonation_audits`
+(migração `015_impersonation_audit.sql`), além do log de texto que já
+existia — a gravação é best-effort (falhar não impede o acesso). `GET
+/admin/audit` lista essa trilha, mais recente primeiro, com quem
+impersonou (`actor_name`/`actor_email`) e qual barbearia
+(`tenant_id`/`tenant_name`/`tenant_slug`) foi acessada em cada linha;
+limitado a 200 linhas — é uma trilha pra revisar, não um relatório
+paginado.
 
 A única exceção deliberada ao isolamento por tenant é `GET
 /admin/customers?q=`: busca clientes por nome, celular ou e-mail (`ILIKE`,

@@ -214,6 +214,20 @@ type AdminCustomerMatch struct {
 	TenantSlug string `json:"tenant_slug"`
 }
 
+// ImpersonationAudit is one row of the durable impersonation trail (GET
+// /admin/audit): which superadmin accessed which barbershop, and when —
+// the log.Printf in server.impersonateTenant stays for local debugging,
+// this is the queryable record.
+type ImpersonationAudit struct {
+	ID         string    `json:"id"`
+	ActorName  string    `json:"actor_name"`
+	ActorEmail string    `json:"actor_email,omitempty"`
+	TenantID   string    `json:"tenant_id"`
+	TenantName string    `json:"tenant_name"`
+	TenantSlug string    `json:"tenant_slug"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 type Appointment struct {
 	ID               string    `json:"id"`
 	CustomerID       string    `json:"customer_id"`

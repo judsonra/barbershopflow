@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './api'
 import { downloadICS, googleCalendarUrl } from './calendar'
 import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
-import type { AdminCustomerMatch, Appointment, Customer, MembershipOption, Professional, Report, Service, Tenant, TimeOff, User } from './types'
+import type { AdminCustomerMatch, Appointment, Customer, ImpersonationAuditEntry, MembershipOption, Professional, Report, Service, Tenant, TimeOff, User } from './types'
 
 function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : 'Erro inesperado'
@@ -45,13 +45,15 @@ export default function App() {
 // docs/api.md). Logging back out returns to this same login; to switch
 // back to the admin view, log in again with the superadmin account.
 function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersonate: (user: User) => void; onLogout: () => void }) {
-  const [view, setView] = useState<'tenants' | 'customers' | 'profile'>('tenants')
+  const [view, setView] = useState<'tenants' | 'customers' | 'audit' | 'profile'>('tenants')
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [customerQuery, setCustomerQuery] = useState('')
   const [customerResults, setCustomerResults] = useState<AdminCustomerMatch[]>([])
   const [searching, setSearching] = useState(false)
+  const [auditEntries, setAuditEntries] = useState<ImpersonationAuditEntry[]>([])
+  const [auditLoading, setAuditLoading] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -76,6 +78,15 @@ function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersona
     return () => clearTimeout(timeout)
   }, [customerQuery])
 
+  // Reloads every time the tab is opened rather than caching — it's a
+  // trail meant to be checked occasionally, freshness matters more than
+  // saving a request.
+  useEffect(() => {
+    if (view !== 'audit') return
+    setAuditLoading(true); setError('')
+    api.listImpersonationAudit().then(setAuditEntries).catch(err => setError(errorMessage(err))).finally(() => setAuditLoading(false))
+  }, [view])
+
   async function access(tenantId: string) {
     setError('')
     try { onImpersonate(await api.impersonateTenant(tenantId)) }
@@ -84,7 +95,7 @@ function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersona
 
   return <div className="app-shell">
     <header>
-      <div><span className="eyebrow">SUPERADMIN</span><h1>{view === 'customers' ? 'Clientes' : 'Barbearias'}</h1></div>
+      <div><span className="eyebrow">SUPERADMIN</span><h1>{view === 'customers' ? 'Clientes' : view === 'audit' ? 'Auditoria' : 'Barbearias'}</h1></div>
       <button className="avatar" title={`${user.name} · Perfil`} onClick={() => setView('profile')}>{user.name.slice(0, 2).toUpperCase()}</button>
     </header>
     <main>
@@ -113,10 +124,20 @@ function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersona
             <button onClick={() => void access(c.tenant_id)}>Acessar como gestor</button>
           </li>)}</ul>}
       </>}
+
+      {view === 'audit' && <>
+        {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
+        {auditLoading ? <div className="empty">Carregando…</div> :
+          auditEntries.length === 0 ? <div className="empty"><span>🕓</span><h2>Nenhum acesso registrado</h2></div> :
+          <ul className="tenant-list">{auditEntries.map(a => <li key={a.id}>
+            <div><b>{a.tenant_name}</b><small>{a.actor_name}{a.actor_email ? ` (${a.actor_email})` : ''} · {dateTime.format(new Date(a.created_at))}</small></div>
+          </li>)}</ul>}
+      </>}
     </main>
     {view !== 'profile' && <nav>
       <button className={view === 'tenants' ? 'active' : ''} onClick={() => setView('tenants')}><span>🏠</span>Barbearias</button>
       <button className={view === 'customers' ? 'active' : ''} onClick={() => setView('customers')}><span>🔎</span>Clientes</button>
+      <button className={view === 'audit' ? 'active' : ''} onClick={() => setView('audit')}><span>🕓</span>Auditoria</button>
     </nav>}
   </div>
 }

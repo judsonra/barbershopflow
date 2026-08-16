@@ -64,4 +64,12 @@ describe('api client', () => {
     await expect(api.searchCustomersAdmin('(11) 9')).resolves.toEqual(body)
     expect(fetch).toHaveBeenCalledWith('/api/v1/admin/customers?q=(11)%209', expect.any(Object))
   })
+
+  it('loads the impersonation audit trail', async () => {
+    const body = [{ id: '1', actor_name: 'Admin', tenant_id: 't1', tenant_name: 'Barbearia A', tenant_slug: 'barbearia-a', created_at: '2026-01-01T00:00:00Z' }]
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 })))
+
+    await expect(api.listImpersonationAudit()).resolves.toEqual(body)
+    expect(fetch).toHaveBeenCalledWith('/api/v1/admin/audit', expect.any(Object))
+  })
 })
