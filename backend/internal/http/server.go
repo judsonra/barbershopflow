@@ -68,6 +68,8 @@ type Store interface {
 	ListTimeOff(ctx context.Context, tenantID, professionalID string, from, to time.Time) ([]domain.TimeOff, error)
 	CreateTimeOff(ctx context.Context, tenantID, professionalID string, item domain.TimeOff) (domain.TimeOff, error)
 	DeleteTimeOff(ctx context.Context, tenantID, professionalID, id string) error
+	ListProfessionalServices(ctx context.Context, tenantID, professionalID string) ([]domain.ProfessionalService, error)
+	SetProfessionalServices(ctx context.Context, tenantID, professionalID string, entries []domain.ProfessionalService) ([]domain.ProfessionalService, error)
 	CreateTenantWithManager(ctx context.Context, tenantName, slug, managerName, email, passwordHash string) (domain.Tenant, domain.User, error)
 }
 
@@ -127,6 +129,8 @@ func New(store Store, cfg Config) http.Handler {
 	protected.HandleFunc("GET /api/v1/professionals/{id}/time-off", s.listTimeOff)
 	protected.HandleFunc("POST /api/v1/professionals/{id}/time-off", s.requireOwnerOrManager(s.createTimeOff))
 	protected.HandleFunc("DELETE /api/v1/professionals/{id}/time-off/{blockId}", s.requireOwnerOrManager(s.deleteTimeOff))
+	protected.HandleFunc("GET /api/v1/professionals/{id}/services", s.listProfessionalServices)
+	protected.HandleFunc("PUT /api/v1/professionals/{id}/services", s.requireRole(domain.RoleManager, s.setProfessionalServices))
 	protected.HandleFunc("POST /api/v1/professionals/{id}/credentials", s.requireRole(domain.RoleManager, s.grantProfessionalAccess))
 	protected.HandleFunc("GET /api/v1/customers", s.requireStaff(s.listCustomers))
 	protected.HandleFunc("POST /api/v1/customers", s.requireStaff(s.createCustomer))
@@ -1134,6 +1138,44 @@ func (s *server) deleteTimeOff(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Bloqueio removido."})
 }
 
+func (s *server) listProfessionalServices(w http.ResponseWriter, r *http.Request) {
+	claims, _ := claimsFromContext(r)
+	items, err := s.store.ListProfessionalServices(r.Context(), claims.TenantID, r.PathValue("id"))
+	respond(w, items, err)
+}
+
+func (s *server) setProfessionalServices(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Entries []domain.ProfessionalService `json:"entries"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	seen := map[string]bool{}
+	for _, entry := range body.Entries {
+		if entry.ServiceID == "" {
+			writeError(w, http.StatusBadRequest, "validation_error", "service_id é obrigatório")
+			return
+		}
+		if seen[entry.ServiceID] {
+			writeError(w, http.StatusBadRequest, "validation_error", "serviço repetido")
+			return
+		}
+		seen[entry.ServiceID] = true
+		if entry.PriceCentsOverride != nil && *entry.PriceCentsOverride < 0 {
+			writeError(w, http.StatusBadRequest, "validation_error", "preço não pode ser negativo")
+			return
+		}
+		if entry.DurationMinutesOverride != nil && *entry.DurationMinutesOverride <= 0 {
+			writeError(w, http.StatusBadRequest, "validation_error", "duração deve ser maior que zero")
+			return
+		}
+	}
+	claims, _ := claimsFromContext(r)
+	items, err := s.store.SetProfessionalServices(r.Context(), claims.TenantID, r.PathValue("id"), body.Entries)
+	respond(w, items, err)
+}
+
 func (s *server) listCustomers(w http.ResponseWriter, r *http.Request) {
 	claims, _ := claimsFromContext(r)
 	items, err := s.store.ListCustomers(r.Context(), claims.TenantID)
@@ -1320,6 +1362,8 @@ func handleError(w http.ResponseWriter, err error) {
 		writeError(w, 409, "outside_working_hours", "horário fora da jornada de trabalho do profissional")
 	case errors.Is(err, domain.ErrTimeBlocked):
 		writeError(w, 409, "time_blocked", "horário bloqueado (ausência, folga ou viagem)")
+	case errors.Is(err, domain.ErrServiceNotOffered):
+		writeError(w, 409, "service_not_offered", "profissional não realiza este serviço")
 	default:
 		log.Printf("request error: %v", err)
 		writeError(w, 500, "internal_error", "erro interno")

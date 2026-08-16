@@ -37,8 +37,7 @@ atual (backend Go, frontend React/PWA, infra Docker).
 
 - [x] Jornada de trabalho por profissional (horário inicial/final por dia da semana, `PUT /professionals/{id}/schedule`) e bloqueios pontuais (ausência/folga/viagem, `POST /professionals/{id}/time-off`) — sem jornada configurada = sem restrição (retrocompat); profissional edita a própria, gestor edita qualquer uma
 - [ ] Feriados (calendário compartilhado da barbearia, hoje só dá pra bloquear profissional por profissional)
-- [ ] Especialidades por profissional (hoje qualquer ativo faz qualquer serviço)
-- [ ] Preços/durações customizados por profissional
+- [x] Especialidades por profissional e preços/durações customizados: tabela `professional_services` (profissional × serviço) com override opcional de preço/duração — `GET`/`PUT /professionals/{id}/services` (`PUT` só `manager`, decisão de preço não é do profissional). Sem nenhuma linha para o profissional, comportamento retrocompatível (qualquer serviço ativo, preço/duração padrão); com ao menos uma linha, só os serviços marcados podem ser agendados para ele (`409 service_not_offered` senão), usando o override quando presente. Seção "Especialidades e preços" na tela de detalhe do profissional (Config → Profissionais)
 - [x] Autoagendamento público (cliente cria o próprio horário), com dois parâmetros por barbearia: `self_scheduling_enabled` (liga/desliga) e `auto_confirm_appointments` (auto-confirma ou entra pendente para o profissional confirmar manualmente) — configurável em `PATCH /api/v1/tenant`, aba "Config" no app
 - [ ] Lembretes por WhatsApp/e-mail (confirmação em si já existe via auto-confirmação ou confirmação manual acima)
 - [ ] Sinal/pagamento antecipado, caixa, comissões, cupons, fidelidade

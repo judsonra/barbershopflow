@@ -82,6 +82,8 @@ senha quando a identidade é realmente nova.
 | GET | `/professionals/{id}/time-off?from=&to=` | Lista bloqueios (ausência/folga/viagem) no período | qualquer papel |
 | POST | `/professionals/{id}/time-off` | Cria um bloqueio | `manager` ou o próprio `professional` |
 | DELETE | `/professionals/{id}/time-off/{blockId}` | Remove um bloqueio | `manager` ou o próprio `professional` |
+| GET | `/professionals/{id}/services` | Especialidades do profissional (serviços habilitados + overrides) | qualquer papel |
+| PUT | `/professionals/{id}/services` | Substitui o conjunto de especialidades inteiro | `manager` |
 | POST | `/professionals/{id}/credentials` | Concede/renova acesso por celular a um profissional | `manager` |
 | GET | `/customers` | Lista clientes | `manager` ou `professional` |
 | POST | `/customers` | Cria cliente | `manager` ou `professional` |
@@ -301,6 +303,30 @@ criados. Sem nenhuma entrada, o profissional não tem restrição de horário.
 
 `POST /appointments` responde `409 outside_working_hours` se o horário cair
 fora da jornada do dia, e `409 time_blocked` se sobrepuser um bloqueio.
+
+## Especialidades e preços por profissional
+
+`PUT /professionals/{id}/services` substitui o conjunto inteiro de
+especialidades do profissional (mesmo padrão de substituição total do
+`PUT .../schedule` acima, só que aqui é `manager`-only — preço é decisão de
+negócio, não do profissional):
+
+```json
+{
+  "entries": [
+    { "service_id": "uuid-do-corte", "price_cents_override": 4500 },
+    { "service_id": "uuid-da-barba" }
+  ]
+}
+```
+
+`price_cents_override`/`duration_minutes_override` são opcionais; quando
+ausentes (ou `null`), o agendamento usa o preço/duração padrão do serviço.
+Sem nenhuma entrada, o profissional não tem restrição de especialidade
+(retrocompatível): qualquer serviço ativo pode ser agendado para ele. A
+partir da primeira entrada, `POST /appointments` responde `409
+service_not_offered` se o `service_id` pedido não estiver entre as
+especialidades cadastradas para aquele profissional.
 
 ## Relatórios
 
