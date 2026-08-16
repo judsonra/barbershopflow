@@ -1,4 +1,4 @@
-import type { AdminCustomerMatch, Appointment, Customer, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
+import type { AdminCustomerMatch, Appointment, Customer, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
 
 const ACCESS_KEY = 'bf_access_token'
 const REFRESH_KEY = 'bf_refresh_token'
@@ -146,6 +146,10 @@ export const api = {
   tenant: () => request<Tenant>('/tenant'),
   updateTenant: (data: { name: string; slug: string; self_scheduling_enabled: boolean; auto_confirm_appointments: boolean }) =>
     request<Tenant>('/tenant', { method: 'PATCH', body: JSON.stringify(data) }),
+  holidays: () => request<Holiday[]>('/tenant/holidays'),
+  createHoliday: (data: { date: string; name?: string }) =>
+    request<Holiday>('/tenant/holidays', { method: 'POST', body: JSON.stringify(data) }),
+  deleteHoliday: (id: string) => request<{ message: string }>(`/tenant/holidays/${id}`, { method: 'DELETE' }),
   services: () => request<Service[]>('/services'),
   createService: (data: { name: string; duration_minutes: number; price_cents: number }) =>
     request<Service>('/services', { method: 'POST', body: JSON.stringify(data) }),

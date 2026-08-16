@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './api'
 import { downloadICS, googleCalendarUrl } from './calendar'
 import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
-import type { AdminCustomerMatch, Appointment, Customer, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, Service, Tenant, TimeOff, User } from './types'
+import type { AdminCustomerMatch, Appointment, Customer, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, Service, Tenant, TimeOff, User } from './types'
 
 function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : 'Erro inesperado'
@@ -464,12 +464,38 @@ function TenantConfig({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (t
   const [autoConfirm, setAutoConfirm] = useState(tenant.auto_confirm_appointments)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [holidays, setHolidays] = useState<Holiday[]>([])
+  const [holidaysLoading, setHolidaysLoading] = useState(true)
+  const [holidaysError, setHolidaysError] = useState('')
+  const [newHoliday, setNewHoliday] = useState({ date: '', name: '' })
+  const [holidaySaving, setHolidaySaving] = useState(false)
+
+  useEffect(() => {
+    api.holidays().then(setHolidays).catch(err => setHolidaysError(errorMessage(err))).finally(() => setHolidaysLoading(false))
+  }, [])
 
   async function save() {
     setSaving(true); setError('')
     try { onSaved(await api.updateTenant({ name: tenant.name, slug: tenant.slug, self_scheduling_enabled: selfScheduling, auto_confirm_appointments: autoConfirm })) }
     catch (err) { setError(errorMessage(err)) }
     finally { setSaving(false) }
+  }
+
+  async function addHoliday(event: FormEvent) {
+    event.preventDefault(); setHolidaysError(''); setHolidaySaving(true)
+    try {
+      const created = await api.createHoliday({ date: newHoliday.date, name: newHoliday.name })
+      setHolidays(v => [...v, created].sort((a, b) => a.date.localeCompare(b.date)))
+      setNewHoliday({ date: '', name: '' })
+    }
+    catch (err) { setHolidaysError(errorMessage(err)) }
+    finally { setHolidaySaving(false) }
+  }
+
+  async function removeHoliday(id: string) {
+    setHolidaysError('')
+    try { await api.deleteHoliday(id); setHolidays(v => v.filter(h => h.id !== id)) }
+    catch (err) { setHolidaysError(errorMessage(err)) }
   }
 
   return <section className="form-page"><span className="eyebrow">CONFIGURAÇÕES</span><h2>{tenant.name}</h2>
@@ -482,6 +508,24 @@ function TenantConfig({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (t
         : 'Só a equipe cria agendamentos.'}</p>
       <button className="primary" disabled={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
     </form>
+
+    <h2>Feriados</h2>
+    {holidaysError && <div className="alert">{holidaysError}</div>}
+    {holidaysLoading ? <p>Carregando…</p> : <>
+      <p>Nenhum agendamento é aceito nessas datas, para nenhum profissional.</p>
+      {holidays.length === 0 ? <p>Nenhum feriado cadastrado.</p> : <ul className="tenant-list">
+        {holidays.map(h => <li key={h.id}>
+          <div><b>{new Date(h.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</b>{h.name && <small> · {h.name}</small>}</div>
+          <button type="button" onClick={() => void removeHoliday(h.id)}>Remover</button>
+        </li>)}
+      </ul>}
+      <form onSubmit={addHoliday} className="quick">
+        <label>Data<input type="date" lang="pt-BR" required value={newHoliday.date} onChange={e => setNewHoliday({ ...newHoliday, date: e.target.value })} /></label>
+        <input placeholder="Nome (opcional, ex: Natal)" value={newHoliday.name} onChange={e => setNewHoliday({ ...newHoliday, name: e.target.value })} />
+        <button disabled={holidaySaving}>{holidaySaving ? 'Adicionando…' : 'Adicionar feriado'}</button>
+      </form>
+    </>}
+
     <button type="button" className="link-button" onClick={onBack}>Voltar</button>
   </section>
 }

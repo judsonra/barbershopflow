@@ -102,6 +102,10 @@ acesso a redes confiáveis.
    bloqueio. Vale tanto para staff quanto para autoagendamento do cliente.
 5. Só o próprio profissional ou o gestor podem editar a jornada e os
    bloqueios de um profissional.
+6. Feriados (`tenant_holidays`, `GET`/`POST /tenant/holidays`, `DELETE
+   /tenant/holidays/{id}`) bloqueiam a data inteira para **todos** os
+   profissionais da barbearia de uma vez — diferente do bloqueio pontual do
+   item 3, que é por profissional. Só o gestor cadastra/remove feriados.
 
 ### Clientes
 
@@ -174,7 +178,6 @@ padrão: mês corrente.
 
 ## Fora do MVP, mas previsto
 
-- Jornada de trabalho, bloqueios, folgas e feriados.
 - Lembretes por WhatsApp/e-mail.
 - Sinal, pagamentos, caixa, comissões, cupons e programa de fidelidade.
 - Política configurável de cancelamento e no-show.

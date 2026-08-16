@@ -681,6 +681,19 @@ func (r *Repository) CreateAppointment(ctx context.Context, tenantID, status str
 		return item, domain.ErrTimeBlocked
 	}
 
+	holidayDate, err := time.Parse("2006-01-02", item.StartsAt.Format("2006-01-02"))
+	if err != nil {
+		return item, err
+	}
+	var isHoliday bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tenant_holidays WHERE tenant_id=$1 AND holiday_date=$2)`,
+		tenantID, holidayDate).Scan(&isHoliday); err != nil {
+		return item, err
+	}
+	if isHoliday {
+		return item, domain.ErrHolidayBlocked
+	}
+
 	err = tx.QueryRow(ctx, `INSERT INTO appointments(tenant_id,customer_id,professional_id,service_id,starts_at,ends_at,notes,price_cents,status)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,status,created_at`,
 		tenantID, item.CustomerID, item.ProfessionalID, item.ServiceID, item.StartsAt, item.EndsAt, item.Notes, item.PriceCents, status).
@@ -1027,6 +1040,51 @@ func (r *Repository) UpdateTenant(ctx context.Context, tenantID, name, slug stri
 		return item, domain.ErrConflict
 	}
 	return item, err
+}
+
+func (r *Repository) ListHolidays(ctx context.Context, tenantID string) ([]domain.Holiday, error) {
+	rows, err := r.db.Query(ctx, `SELECT id, holiday_date, name, created_at FROM tenant_holidays WHERE tenant_id=$1 ORDER BY holiday_date`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.Holiday{}
+	for rows.Next() {
+		var item domain.Holiday
+		var date time.Time
+		if err := rows.Scan(&item.ID, &date, &item.Name, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		item.Date = date.Format("2006-01-02")
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// CreateHoliday expects item.Date already validated as "YYYY-MM-DD" by the
+// caller (see server.createHoliday).
+func (r *Repository) CreateHoliday(ctx context.Context, tenantID string, item domain.Holiday) (domain.Holiday, error) {
+	date, err := time.Parse("2006-01-02", item.Date)
+	if err != nil {
+		return item, err
+	}
+	err = r.db.QueryRow(ctx, `INSERT INTO tenant_holidays(tenant_id, holiday_date, name) VALUES($1,$2,$3) RETURNING id, created_at`,
+		tenantID, date, item.Name).Scan(&item.ID, &item.CreatedAt)
+	if _, ok := isUniqueViolation(err); ok {
+		return item, domain.ErrConflict
+	}
+	return item, err
+}
+
+func (r *Repository) DeleteHoliday(ctx context.Context, tenantID, id string) error {
+	tag, err := r.db.Exec(ctx, `DELETE FROM tenant_holidays WHERE id=$1 AND tenant_id=$2`, id, tenantID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 // CreateTenantWithManager is the self-service onboarding flow: a brand-new
