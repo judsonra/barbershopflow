@@ -143,7 +143,7 @@ export const api = {
   logout: () => clearTokens(),
   me: () => request<User>('/auth/me'),
   tenant: () => request<Tenant>('/tenant'),
-  updateTenant: (data: { self_scheduling_enabled: boolean; auto_confirm_appointments: boolean }) =>
+  updateTenant: (data: { self_scheduling_enabled: boolean; auto_confirm_appointments: boolean; cancellation_window_hours: number }) =>
     request<Tenant>('/tenant', { method: 'PATCH', body: JSON.stringify(data) }),
   services: () => request<Service[]>('/services'),
   createService: (data: { name: string; duration_minutes: number; price_cents: number }) =>

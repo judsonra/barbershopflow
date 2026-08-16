@@ -88,13 +88,13 @@ senha quando a identidade é realmente nova.
 | PATCH | `/customers/{id}` | Atualiza dados/ativo do cliente (usado também para desativar/reativar) | `manager` ou `professional` |
 | POST | `/customers/{id}/credentials` | Concede/renova acesso por celular a um cliente | `manager` ou `professional` |
 | GET | `/tenant` | Configurações da própria barbearia | qualquer papel |
-| PATCH | `/tenant` | Liga/desliga autoagendamento e auto-confirmação | `manager` |
+| PATCH | `/tenant` | Liga/desliga autoagendamento, auto-confirmação e prazo de cancelamento | `manager` |
 | GET | `/admin/tenants` | Lista todas as barbearias da plataforma | `superadmin` |
 | POST | `/admin/tenants/{id}/impersonate` | Vira o gestor daquela barbearia (novo access/refresh token) | `superadmin` |
 | GET | `/admin/customers?q=` | Busca clientes por nome/celular/e-mail em todas as barbearias | `superadmin` |
 | GET | `/appointments?from=&to=` | Lista agenda no período (`client` só vê os próprios; `professional` só vê os da própria agenda) | qualquer papel |
 | POST | `/appointments` | Cria agendamento; `client` só se autoagendamento estiver ligado, ver "Autoagendamento" | qualquer papel |
-| PATCH | `/appointments/{id}/status` | Altera estado | `manager`/`professional` (profissional só no próprio agendamento); `client` não pode |
+| PATCH | `/appointments/{id}/status` | Altera estado (`confirmed`/`completed`/`cancelled`/`no_show`) | `manager`/`professional` (profissional só no próprio agendamento); `client` só `cancelled` no próprio, dentro do prazo — ver "Política de cancelamento" |
 
 Exemplo de login por e-mail:
 
@@ -192,7 +192,7 @@ preciso impersonar.
 `GET /tenant` retorna as configurações da barbearia:
 
 ```json
-{ "id": "uuid", "name": "...", "slug": "...", "self_scheduling_enabled": false, "auto_confirm_appointments": false, "active": true }
+{ "id": "uuid", "name": "...", "slug": "...", "self_scheduling_enabled": false, "auto_confirm_appointments": false, "cancellation_window_hours": 0, "active": true }
 ```
 
 `PATCH /services/{id}` (só `manager`) substitui o serviço inteiro — não há
@@ -212,10 +212,12 @@ substitui o cliente inteiro (`name`, `phone`, `email`, `active`), sem merge
 parcial, e "Excluir" também é soft-delete via `active: false` — mesma razão
 de FK, agora em `appointments.customer_id`.
 
-`PATCH /tenant` (só `manager`) liga/desliga os dois parâmetros independentes:
+`PATCH /tenant` (só `manager`) substitui os três parâmetros inteiros, sem
+merge parcial (sempre envie os três, mesmo padrão de `PATCH
+/services/{id}` acima):
 
 ```json
-{ "self_scheduling_enabled": true, "auto_confirm_appointments": false }
+{ "self_scheduling_enabled": true, "auto_confirm_appointments": false, "cancellation_window_hours": 24 }
 ```
 
 - `self_scheduling_enabled = false`: só staff cria agendamento; `client` que
@@ -236,6 +238,20 @@ de FK, agora em `appointments.customer_id`.
 formato, CPF pelos dígitos verificadores (`400 validation_error` se
 inválido). CPF pode ser enviado formatado (`111.444.777-35`) ou só dígitos —
 o servidor normaliza antes de salvar.
+
+## Política de cancelamento e no-show
+
+`cancellation_window_hours` (`PATCH /tenant`, ver acima) é a única
+configuração: quantas horas antes do início o cliente ainda pode cancelar o
+próprio agendamento. `0` (padrão) é sem restrição.
+
+`PATCH /appointments/{id}/status` com `{"status":"cancelled"}` agora
+também aceita `client`, mas só no próprio agendamento (`customer_id` do
+token) e só fora do prazo — dentro do prazo responde `403 forbidden`.
+`client` não pode enviar nenhum outro `status`. `manager`/`professional`
+continuam podendo cancelar a qualquer momento, sem essa restrição, e são
+os únicos que podem marcar `{"status":"no_show"}` (cliente não apareceu —
+estado terminal distinto de `cancelled`).
 
 ## Jornada de trabalho e bloqueios
 

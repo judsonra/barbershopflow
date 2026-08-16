@@ -470,6 +470,18 @@ func (r *Repository) GetAppointmentProfessionalID(ctx context.Context, tenantID,
 	return professionalID, err
 }
 
+// GetAppointmentForCancellation backs the client self-cancellation flow
+// (server.updateStatus): the caller needs the owning customer_id (to check
+// it's really this client's own appointment) and starts_at (to enforce the
+// tenant's cancellation window) before allowing the status change.
+func (r *Repository) GetAppointmentForCancellation(ctx context.Context, tenantID, id string) (customerID string, startsAt time.Time, err error) {
+	err = r.db.QueryRow(ctx, `SELECT customer_id, starts_at FROM appointments WHERE id=$1 AND tenant_id=$2`, id, tenantID).Scan(&customerID, &startsAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", time.Time{}, domain.ErrNotFound
+	}
+	return customerID, startsAt, err
+}
+
 const identityColumns = `id, name, email, phone, password_hash, google_id, facebook_id,
 	failed_login_attempts, locked_at, created_at`
 
@@ -682,10 +694,10 @@ func (r *Repository) CreateIdentityWithMembership(ctx context.Context, name, ema
 	return r.GetMembershipByID(ctx, membershipID)
 }
 
-const tenantColumns = `id, name, slug, self_scheduling_enabled, auto_confirm_appointments, active, created_at`
+const tenantColumns = `id, name, slug, self_scheduling_enabled, auto_confirm_appointments, cancellation_window_hours, active, created_at`
 
 func scanTenant(item *domain.Tenant) []any {
-	return []any{&item.ID, &item.Name, &item.Slug, &item.SelfSchedulingEnabled, &item.AutoConfirmAppointments, &item.Active, &item.CreatedAt}
+	return []any{&item.ID, &item.Name, &item.Slug, &item.SelfSchedulingEnabled, &item.AutoConfirmAppointments, &item.CancellationWindowHours, &item.Active, &item.CreatedAt}
 }
 
 // ListTenants is superadmin-only: every other query in this file is
@@ -747,12 +759,12 @@ func (r *Repository) GetTenantByID(ctx context.Context, id string) (domain.Tenan
 
 // UpdateTenantSettings lets a manager turn self-scheduling and
 // auto-confirmation on or off for their own barbershop.
-func (r *Repository) UpdateTenantSettings(ctx context.Context, tenantID string, selfSchedulingEnabled, autoConfirmAppointments bool) (domain.Tenant, error) {
+func (r *Repository) UpdateTenantSettings(ctx context.Context, tenantID string, selfSchedulingEnabled, autoConfirmAppointments bool, cancellationWindowHours int) (domain.Tenant, error) {
 	var item domain.Tenant
 	err := r.db.QueryRow(ctx, `
-		UPDATE tenants SET self_scheduling_enabled=$2, auto_confirm_appointments=$3
+		UPDATE tenants SET self_scheduling_enabled=$2, auto_confirm_appointments=$3, cancellation_window_hours=$4
 		WHERE id=$1 RETURNING `+tenantColumns,
-		tenantID, selfSchedulingEnabled, autoConfirmAppointments).Scan(scanTenant(&item)...)
+		tenantID, selfSchedulingEnabled, autoConfirmAppointments, cancellationWindowHours).Scan(scanTenant(&item)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item, domain.ErrNotFound
 	}

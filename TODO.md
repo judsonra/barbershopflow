@@ -42,7 +42,7 @@ atual (backend Go, frontend React/PWA, infra Docker).
 - [x] Autoagendamento público (cliente cria o próprio horário), com dois parâmetros por barbearia: `self_scheduling_enabled` (liga/desliga) e `auto_confirm_appointments` (auto-confirma ou entra pendente para o profissional confirmar manualmente) — configurável em `PATCH /api/v1/tenant`, aba "Config" no app
 - [ ] Lembretes por WhatsApp/e-mail (confirmação em si já existe via auto-confirmação ou confirmação manual acima)
 - [ ] Sinal/pagamento antecipado, caixa, comissões, cupons, fidelidade
-- [ ] Política configurável de cancelamento e no-show
+- [x] Política configurável de cancelamento e no-show: `cancellation_window_hours` por tenant (`PATCH /tenant`, `manager`) define quantas horas antes do início o cliente ainda pode cancelar o próprio agendamento — `0` (padrão) é sem restrição. Cliente ganhou permissão nova de autocancelamento (`PATCH /appointments/{id}/status` com `status=cancelled`, só o próprio agendamento, só dentro do prazo — `403` fora dele); staff/profissional nunca são restringidos por esse prazo. Novo status terminal `no_show` (distinto de `cancelled`) para staff/profissional marcarem quando o cliente não aparece
 - [ ] LGPD: consentimento, exportação de dados, anonimização, trilha de auditoria
 - [ ] Relatórios de ocupação, faturamento e retenção
 

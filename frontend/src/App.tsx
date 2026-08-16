@@ -11,7 +11,7 @@ function errorMessage(err: unknown) {
 const roleLabel: Record<string, string> = { manager: 'Gestor', professional: 'Profissional', client: 'Cliente', superadmin: 'Superadmin' }
 const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 const dateTime = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })
-const statusLabel = { scheduled: 'Agendado', confirmed: 'Confirmado', completed: 'Concluído', cancelled: 'Cancelado' }
+const statusLabel = { scheduled: 'Agendado', confirmed: 'Confirmado', completed: 'Concluído', cancelled: 'Cancelado', no_show: 'Não compareceu' }
 
 function dayBounds(offset = 0) {
   const from = new Date(); from.setDate(from.getDate() + offset); from.setHours(0, 0, 0, 0)
@@ -387,8 +387,19 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
                 <a href={googleCalendarUrl(item)} target="_blank" rel="noreferrer">Google Agenda</a>
                 <button type="button" onClick={() => downloadICS(item)}>Baixar .ics</button>
               </div>}
-              {!isClient && item.status === 'scheduled' && <div className="actions"><button onClick={() => changeStatus(item, 'confirmed')}>Confirmar</button><button onClick={() => changeStatus(item, 'cancelled')}>Cancelar</button></div>}
-              {!isClient && item.status === 'confirmed' && <div className="actions"><button onClick={() => changeStatus(item, 'completed')}>Concluir</button><button onClick={() => changeStatus(item, 'cancelled')}>Cancelar</button></div>}
+              {!isClient && item.status === 'scheduled' && <div className="actions">
+                <button onClick={() => changeStatus(item, 'confirmed')}>Confirmar</button>
+                <button onClick={() => changeStatus(item, 'cancelled')}>Cancelar</button>
+                <button onClick={() => changeStatus(item, 'no_show')}>Não compareceu</button>
+              </div>}
+              {!isClient && item.status === 'confirmed' && <div className="actions">
+                <button onClick={() => changeStatus(item, 'completed')}>Concluir</button>
+                <button onClick={() => changeStatus(item, 'cancelled')}>Cancelar</button>
+                <button onClick={() => changeStatus(item, 'no_show')}>Não compareceu</button>
+              </div>}
+              {isClient && (item.status === 'scheduled' || item.status === 'confirmed') && <div className="actions">
+                <button onClick={() => changeStatus(item, 'cancelled')}>Cancelar</button>
+              </div>}
             </div>
           </article>)}</section>}
       </>}
@@ -437,12 +448,22 @@ function ConfigMenu({ onSelect }: { onSelect: (view: 'agenda' | 'services' | 'pr
 function TenantConfig({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (tenant: Tenant) => void; onBack: () => void }) {
   const [selfScheduling, setSelfScheduling] = useState(tenant.self_scheduling_enabled)
   const [autoConfirm, setAutoConfirm] = useState(tenant.auto_confirm_appointments)
+  const [cancellationWindow, setCancellationWindow] = useState(String(tenant.cancellation_window_hours))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   async function save() {
-    setSaving(true); setError('')
-    try { onSaved(await api.updateTenant({ self_scheduling_enabled: selfScheduling, auto_confirm_appointments: autoConfirm })) }
+    setError('')
+    const cancellationWindowHours = Number(cancellationWindow)
+    if (!Number.isFinite(cancellationWindowHours) || cancellationWindowHours < 0) {
+      setError('Prazo de cancelamento inválido.'); return
+    }
+    setSaving(true)
+    try {
+      onSaved(await api.updateTenant({
+        self_scheduling_enabled: selfScheduling, auto_confirm_appointments: autoConfirm, cancellation_window_hours: cancellationWindowHours
+      }))
+    }
     catch (err) { setError(errorMessage(err)) }
     finally { setSaving(false) }
   }
@@ -455,6 +476,9 @@ function TenantConfig({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (t
       <p>{selfScheduling
         ? (autoConfirm ? 'O horário do cliente já entra confirmado e reservado.' : 'O horário do cliente fica reservado como pendente até o profissional confirmar.')
         : 'Só a equipe cria agendamentos.'}</p>
+      <label>Prazo mínimo para o cliente cancelar o próprio horário (em horas, 0 = sem prazo mínimo)
+        <input type="number" min={0} inputMode="numeric" value={cancellationWindow} onChange={e => setCancellationWindow(e.target.value)} />
+      </label>
       <button className="primary" disabled={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
     </form>
     <button type="button" className="link-button" onClick={onBack}>Voltar</button>
