@@ -59,6 +59,9 @@ type Store interface {
 	GetFirstManagerByTenant(ctx context.Context, tenantID string) (domain.User, error)
 	GetTenantByID(ctx context.Context, id string) (domain.Tenant, error)
 	UpdateTenantSettings(ctx context.Context, tenantID string, selfSchedulingEnabled, autoConfirmAppointments bool) (domain.Tenant, error)
+	ListHolidays(ctx context.Context, tenantID string) ([]domain.Holiday, error)
+	CreateHoliday(ctx context.Context, tenantID string, item domain.Holiday) (domain.Holiday, error)
+	DeleteHoliday(ctx context.Context, tenantID, id string) error
 	GetProfessionalSchedule(ctx context.Context, tenantID, professionalID string) ([]domain.ScheduleEntry, error)
 	SetProfessionalSchedule(ctx context.Context, tenantID, professionalID string, entries []domain.ScheduleEntry) ([]domain.ScheduleEntry, error)
 	ListTimeOff(ctx context.Context, tenantID, professionalID string, from, to time.Time) ([]domain.TimeOff, error)
@@ -110,6 +113,9 @@ func New(store Store, cfg Config) http.Handler {
 	protected.HandleFunc("GET /api/v1/admin/customers", s.requireRole(domain.RoleSuperAdmin, s.adminSearchCustomers))
 	protected.HandleFunc("GET /api/v1/tenant", s.getTenant)
 	protected.HandleFunc("PATCH /api/v1/tenant", s.requireRole(domain.RoleManager, s.updateTenant))
+	protected.HandleFunc("GET /api/v1/tenant/holidays", s.listHolidays)
+	protected.HandleFunc("POST /api/v1/tenant/holidays", s.requireRole(domain.RoleManager, s.createHoliday))
+	protected.HandleFunc("DELETE /api/v1/tenant/holidays/{id}", s.requireRole(domain.RoleManager, s.deleteHoliday))
 	protected.HandleFunc("GET /api/v1/services", s.listServices)
 	protected.HandleFunc("POST /api/v1/services", s.requireRole(domain.RoleManager, s.createService))
 	protected.HandleFunc("PATCH /api/v1/services/{id}", s.requireRole(domain.RoleManager, s.updateService))
@@ -644,6 +650,36 @@ func (s *server) updateTenant(w http.ResponseWriter, r *http.Request) {
 	claims, _ := claimsFromContext(r)
 	tenant, err := s.store.UpdateTenantSettings(r.Context(), claims.TenantID, body.SelfSchedulingEnabled, body.AutoConfirmAppointments)
 	respond(w, tenant, err)
+}
+
+func (s *server) listHolidays(w http.ResponseWriter, r *http.Request) {
+	claims, _ := claimsFromContext(r)
+	items, err := s.store.ListHolidays(r.Context(), claims.TenantID)
+	respond(w, items, err)
+}
+
+func (s *server) createHoliday(w http.ResponseWriter, r *http.Request) {
+	var item domain.Holiday
+	if !decode(w, r, &item) {
+		return
+	}
+	if _, err := time.Parse("2006-01-02", item.Date); err != nil {
+		writeError(w, http.StatusBadRequest, "validation_error", "data inválida, use o formato AAAA-MM-DD")
+		return
+	}
+	claims, _ := claimsFromContext(r)
+	created, err := s.store.CreateHoliday(r.Context(), claims.TenantID, item)
+	respondCreated(w, created, err)
+}
+
+func (s *server) deleteHoliday(w http.ResponseWriter, r *http.Request) {
+	claims, _ := claimsFromContext(r)
+	err := s.store.DeleteHoliday(r.Context(), claims.TenantID, r.PathValue("id"))
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Feriado removido."})
 }
 
 // oauthStart redirects to the provider's consent screen. The CSRF state is
@@ -1216,6 +1252,8 @@ func handleError(w http.ResponseWriter, err error) {
 		writeError(w, 409, "outside_working_hours", "horário fora da jornada de trabalho do profissional")
 	case errors.Is(err, domain.ErrTimeBlocked):
 		writeError(w, 409, "time_blocked", "horário bloqueado (ausência, folga ou viagem)")
+	case errors.Is(err, domain.ErrHolidayBlocked):
+		writeError(w, 409, "holiday_blocked", "data é feriado da barbearia")
 	default:
 		log.Printf("request error: %v", err)
 		writeError(w, 500, "internal_error", "erro interno")

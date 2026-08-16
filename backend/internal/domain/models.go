@@ -15,6 +15,7 @@ var (
 	ErrConflict            = errors.New("already in use")
 	ErrOutsideWorkingHours = errors.New("requested time is outside the professional's working hours")
 	ErrTimeBlocked         = errors.New("requested time overlaps a blocked period")
+	ErrHolidayBlocked      = errors.New("requested date is a tenant holiday")
 )
 
 type Tenant struct {
@@ -193,6 +194,18 @@ type TimeOff struct {
 	EndsAt         time.Time `json:"ends_at"`
 	Reason         string    `json:"reason,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
+}
+
+// Holiday is a whole calendar day the barbershop is closed, blocking new
+// appointments for every professional that day regardless of their
+// individual schedule/time-off. Unlike TimeOff (scoped to one
+// professional), a holiday applies to the whole tenant. Date is
+// "YYYY-MM-DD", with no time-of-day component.
+type Holiday struct {
+	ID        string    `json:"id"`
+	Date      string    `json:"date"`
+	Name      string    `json:"name,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Customer struct {

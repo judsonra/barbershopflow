@@ -11,6 +11,7 @@ export type Service = { id: string; name: string; duration_minutes: number; pric
 export type Professional = { id: string; name: string; phone?: string; email?: string; cpf?: string; active: boolean }
 export type ScheduleEntry = { weekday: number; start_minute: number; end_minute: number }
 export type TimeOff = { id: string; professional_id: string; starts_at: string; ends_at: string; reason?: string }
+export type Holiday = { id: string; date: string; name?: string }
 export type Customer = { id: string; name: string; phone?: string; email?: string; active: boolean }
 export type AdminCustomerMatch = Customer & { tenant_id: string; tenant_name: string; tenant_slug: string }
 export type Appointment = {

@@ -89,6 +89,9 @@ senha quando a identidade é realmente nova.
 | POST | `/customers/{id}/credentials` | Concede/renova acesso por celular a um cliente | `manager` ou `professional` |
 | GET | `/tenant` | Configurações da própria barbearia | qualquer papel |
 | PATCH | `/tenant` | Liga/desliga autoagendamento e auto-confirmação | `manager` |
+| GET | `/tenant/holidays` | Lista feriados da barbearia | qualquer papel |
+| POST | `/tenant/holidays` | Cadastra um feriado (bloqueia a data para todos os profissionais) | `manager` |
+| DELETE | `/tenant/holidays/{id}` | Remove um feriado | `manager` |
 | GET | `/admin/tenants` | Lista todas as barbearias da plataforma | `superadmin` |
 | POST | `/admin/tenants/{id}/impersonate` | Vira o gestor daquela barbearia (novo access/refresh token) | `superadmin` |
 | GET | `/admin/customers?q=` | Busca clientes por nome/celular/e-mail em todas as barbearias | `superadmin` |
@@ -265,6 +268,20 @@ criados. Sem nenhuma entrada, o profissional não tem restrição de horário.
 
 `POST /appointments` responde `409 outside_working_hours` se o horário cair
 fora da jornada do dia, e `409 time_blocked` se sobrepuser um bloqueio.
+
+## Feriados
+
+`POST /tenant/holidays` cadastra um feriado, bloqueando a data para todos
+os profissionais da barbearia de uma vez (diferente de `time-off` acima,
+que bloqueia só um profissional):
+
+```json
+{ "date": "2026-12-25", "name": "Natal" }
+```
+
+`date` é `AAAA-MM-DD` (sem horário). `POST /appointments` responde `409
+holiday_blocked` se `starts_at` cair num dia cadastrado como feriado, para
+qualquer profissional.
 
 Exemplo de agendamento:
 
