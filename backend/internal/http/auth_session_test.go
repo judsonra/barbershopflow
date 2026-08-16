@@ -90,7 +90,7 @@ func TestLogin_MultipleMembershipsOffersChoice(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	var body struct {
-		PreauthToken string                       `json:"preauth_token"`
+		PreauthToken string                    `json:"preauth_token"`
 		Memberships  []domain.MembershipOption `json:"memberships"`
 	}
 	decodeBody(t, rec, &body)
