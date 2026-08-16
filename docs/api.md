@@ -212,11 +212,23 @@ substitui o cliente inteiro (`name`, `phone`, `email`, `active`), sem merge
 parcial, e "Excluir" também é soft-delete via `active: false` — mesma razão
 de FK, agora em `appointments.customer_id`.
 
-`PATCH /tenant` (só `manager`) liga/desliga os dois parâmetros independentes:
+`PATCH /tenant` (só `manager`) segue o mesmo contrato de full-replace dos
+outros PATCH: substitui `name`, `slug`, `self_scheduling_enabled` e
+`auto_confirm_appointments` de uma vez, sem merge parcial — a tela de
+configurações que só mexe nos dois parâmetros de agendamento reenvia o
+`name`/`slug` atuais sem alteração.
 
 ```json
-{ "self_scheduling_enabled": true, "auto_confirm_appointments": false }
+{ "name": "Barbearia do Zé", "slug": "barbearia-do-ze", "self_scheduling_enabled": true, "auto_confirm_appointments": false }
 ```
+
+`name` não pode ser vazio e precisa ser único (case-insensitive, `409
+conflict` se repetido — mesma checagem de `POST /tenants`, `GET
+/tenants/availability?name=` pode ser reaproveitado pra checar em tempo
+real antes de salvar). `slug` segue o mesmo padrão do cadastro (letras
+minúsculas, números e hífen, único, `409` se repetido). Trocar o slug
+invalida qualquer link de autocadastro social (`?tenant=<slug>`) já
+compartilhado com o slug antigo.
 
 - `self_scheduling_enabled = false`: só staff cria agendamento; `client` que
   tentar recebe `403 forbidden`.

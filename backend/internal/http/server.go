@@ -58,7 +58,7 @@ type Store interface {
 	ListTenants(ctx context.Context) ([]domain.Tenant, error)
 	GetFirstManagerByTenant(ctx context.Context, tenantID string) (domain.User, error)
 	GetTenantByID(ctx context.Context, id string) (domain.Tenant, error)
-	UpdateTenantSettings(ctx context.Context, tenantID string, selfSchedulingEnabled, autoConfirmAppointments bool) (domain.Tenant, error)
+	UpdateTenant(ctx context.Context, tenantID, name, slug string, selfSchedulingEnabled, autoConfirmAppointments bool) (domain.Tenant, error)
 	GetProfessionalSchedule(ctx context.Context, tenantID, professionalID string) ([]domain.ScheduleEntry, error)
 	SetProfessionalSchedule(ctx context.Context, tenantID, professionalID string, entries []domain.ScheduleEntry) ([]domain.ScheduleEntry, error)
 	ListTimeOff(ctx context.Context, tenantID, professionalID string, from, to time.Time) ([]domain.TimeOff, error)
@@ -633,16 +633,31 @@ func (s *server) getTenant(w http.ResponseWriter, r *http.Request) {
 	respond(w, tenant, err)
 }
 
+// updateTenant is a full-replace PATCH, same contract as
+// services/professionals/customers: the manager's own barbershop name,
+// slug and the two scheduling flags all travel together, no partial merge.
 func (s *server) updateTenant(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		SelfSchedulingEnabled   bool `json:"self_scheduling_enabled"`
-		AutoConfirmAppointments bool `json:"auto_confirm_appointments"`
+		Name                    string `json:"name"`
+		Slug                    string `json:"slug"`
+		SelfSchedulingEnabled   bool   `json:"self_scheduling_enabled"`
+		AutoConfirmAppointments bool   `json:"auto_confirm_appointments"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
+	body.Name = strings.TrimSpace(body.Name)
+	body.Slug = strings.ToLower(strings.TrimSpace(body.Slug))
+	if body.Name == "" {
+		writeError(w, http.StatusBadRequest, "validation_error", "nome da barbearia é obrigatório")
+		return
+	}
+	if !slugPattern.MatchString(body.Slug) {
+		writeError(w, http.StatusBadRequest, "validation_error", "slug deve conter apenas letras minúsculas, números e hífen")
+		return
+	}
 	claims, _ := claimsFromContext(r)
-	tenant, err := s.store.UpdateTenantSettings(r.Context(), claims.TenantID, body.SelfSchedulingEnabled, body.AutoConfirmAppointments)
+	tenant, err := s.store.UpdateTenant(r.Context(), claims.TenantID, body.Name, body.Slug, body.SelfSchedulingEnabled, body.AutoConfirmAppointments)
 	respond(w, tenant, err)
 }
 

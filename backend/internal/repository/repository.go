@@ -745,16 +745,20 @@ func (r *Repository) GetTenantByID(ctx context.Context, id string) (domain.Tenan
 	return item, err
 }
 
-// UpdateTenantSettings lets a manager turn self-scheduling and
-// auto-confirmation on or off for their own barbershop.
-func (r *Repository) UpdateTenantSettings(ctx context.Context, tenantID string, selfSchedulingEnabled, autoConfirmAppointments bool) (domain.Tenant, error) {
+// UpdateTenant is the full-replace PATCH for a manager's own barbershop —
+// same contract as services/professionals/customers: name/slug plus the
+// self-scheduling and auto-confirmation flags, all in one call.
+func (r *Repository) UpdateTenant(ctx context.Context, tenantID, name, slug string, selfSchedulingEnabled, autoConfirmAppointments bool) (domain.Tenant, error) {
 	var item domain.Tenant
 	err := r.db.QueryRow(ctx, `
-		UPDATE tenants SET self_scheduling_enabled=$2, auto_confirm_appointments=$3
+		UPDATE tenants SET name=$2, slug=$3, self_scheduling_enabled=$4, auto_confirm_appointments=$5
 		WHERE id=$1 RETURNING `+tenantColumns,
-		tenantID, selfSchedulingEnabled, autoConfirmAppointments).Scan(scanTenant(&item)...)
+		tenantID, name, slug, selfSchedulingEnabled, autoConfirmAppointments).Scan(scanTenant(&item)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item, domain.ErrNotFound
+	}
+	if _, ok := isUniqueViolation(err); ok {
+		return item, domain.ErrConflict
 	}
 	return item, err
 }
