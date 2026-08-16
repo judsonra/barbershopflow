@@ -96,6 +96,7 @@ senha quando a identidade é realmente nova.
 | GET | `/appointments?from=&to=` | Lista agenda no período (`client` só vê os próprios; `professional` só vê os da própria agenda) | qualquer papel |
 | POST | `/appointments` | Cria agendamento; `client` só se autoagendamento estiver ligado, ver "Autoagendamento" | qualquer papel |
 | PATCH | `/appointments/{id}/status` | Altera estado | `manager`/`professional` (profissional só no próprio agendamento); `client` não pode |
+| GET | `/reports?from=&to=` | Ocupação, faturamento e retenção agregados no período (padrão: mês corrente) | `manager` |
 
 Exemplo de login por e-mail:
 
@@ -290,6 +291,30 @@ criados. Sem nenhuma entrada, o profissional não tem restrição de horário.
 
 `POST /appointments` responde `409 outside_working_hours` se o horário cair
 fora da jornada do dia, e `409 time_blocked` se sobrepuser um bloqueio.
+
+## Relatórios
+
+`GET /reports?from=&to=` (só `manager`; sem os parâmetros, padrão é o mês
+corrente):
+
+```json
+{
+  "from": "2026-08-01T00:00:00Z", "to": "2026-09-01T00:00:00Z",
+  "occupancy": {
+    "overall_rate": 0.42,
+    "by_professional": [{ "professional_id": "uuid", "professional_name": "Rafael", "available_minutes": 4800, "booked_minutes": 2016, "rate": 0.42 }]
+  },
+  "revenue": {
+    "total_cents": 350000,
+    "by_professional": [{ "professional_id": "uuid", "professional_name": "Rafael", "total_cents": 350000 }]
+  },
+  "retention": { "total_customers": 20, "returning_customers": 8, "rate": 0.4 }
+}
+```
+
+`by_professional` só lista profissionais com dado no período (ocupação:
+com jornada configurada; faturamento: com pelo menos um `completed`) —
+sem entrada não é zero, é "não se aplica".
 
 Exemplo de agendamento:
 
