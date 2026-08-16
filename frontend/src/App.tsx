@@ -4,7 +4,7 @@ import { downloadICS, googleCalendarUrl } from './calendar'
 import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
 import type { AdminCustomerMatch, Appointment, Customer, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, Service, Tenant, TimeOff, User } from './types'
 
-function errorMessage(err: unknown) {
+export function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : 'Erro inesperado'
 }
 
@@ -13,7 +13,7 @@ const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL
 const dateTime = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })
 const statusLabel = { scheduled: 'Agendado', confirmed: 'Confirmado', completed: 'Concluído', cancelled: 'Cancelado', no_show: 'Não compareceu' }
 
-function dayBounds(offset = 0) {
+export function dayBounds(offset = 0) {
   const from = new Date(); from.setDate(from.getDate() + offset); from.setHours(0, 0, 0, 0)
   const to = new Date(from); to.setDate(to.getDate() + 1)
   return { from: from.toISOString(), to: to.toISOString() }
@@ -44,7 +44,7 @@ export default function App() {
 // barbershops and "becomes" one's manager to actually do anything (see
 // docs/api.md). Logging back out returns to this same login; to switch
 // back to the admin view, log in again with the superadmin account.
-function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersonate: (user: User) => void; onLogout: () => void }) {
+export function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersonate: (user: User) => void; onLogout: () => void }) {
   const [view, setView] = useState<'tenants' | 'customers' | 'audit' | 'profile'>('tenants')
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loading, setLoading] = useState(true)
@@ -145,7 +145,7 @@ function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onImpersona
 // Shared by AgendaApp and AdminPanel: shows the signed-in account's own
 // data and is the only place "Sair" lives, so clicking the avatar never
 // logs anyone out by surprise anymore.
-function Profile({ user, onLogout, onBack }: { user: User; onLogout: () => void; onBack: () => void }) {
+export function Profile({ user, onLogout, onBack }: { user: User; onLogout: () => void; onBack: () => void }) {
   return <section className="form-page">
     <span className="eyebrow">PERFIL</span><h2>{user.name}</h2>
     <div className="profile-info">
@@ -161,12 +161,12 @@ function Profile({ user, onLogout, onBack }: { user: User; onLogout: () => void;
 
 type LoginMode = 'email' | 'phone' | 'recover' | 'signup' | 'choose-tenant'
 
-function slugify(value: string) {
+export function slugify(value: string) {
   return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
-function Login({ onLogin, initialError, initialChoice }: {
+export function Login({ onLogin, initialError, initialChoice }: {
   onLogin: (user: User) => void; initialError?: string
   initialChoice?: { preauthToken: string; memberships: MembershipOption[] } | null
 }) {
@@ -323,7 +323,7 @@ function Login({ onLogin, initialError, initialChoice }: {
   </div>
 }
 
-function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
+export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   const isClient = user.role === 'client'
   const [tab, setTab] = useState<'agenda' | 'new' | 'config' | 'hours' | 'profile'>('agenda')
   const [configView, setConfigView] = useState<'menu' | 'agenda' | 'tenant' | 'services' | 'professionals' | 'clients' | 'reports'>('menu')
@@ -457,7 +457,7 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   </div>
 }
 
-function ConfigMenu({ onSelect }: { onSelect: (view: 'agenda' | 'tenant' | 'services' | 'professionals' | 'clients' | 'reports') => void }) {
+export function ConfigMenu({ onSelect }: { onSelect: (view: 'agenda' | 'tenant' | 'services' | 'professionals' | 'clients' | 'reports') => void }) {
   return <section className="form-page"><span className="eyebrow">CONFIGURAÇÕES</span><h2>Config</h2>
     <ul className="tenant-list">
       <li role="button" tabIndex={0} onClick={() => onSelect('tenant')}><div><b>Barbearia</b><small>Nome, slug e dados da conta</small></div></li>
@@ -470,7 +470,7 @@ function ConfigMenu({ onSelect }: { onSelect: (view: 'agenda' | 'tenant' | 'serv
   </section>
 }
 
-function TenantConfig({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (tenant: Tenant) => void; onBack: () => void }) {
+export function TenantConfig({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (tenant: Tenant) => void; onBack: () => void }) {
   const [selfScheduling, setSelfScheduling] = useState(tenant.self_scheduling_enabled)
   const [autoConfirm, setAutoConfirm] = useState(tenant.auto_confirm_appointments)
   const [cancellationWindow, setCancellationWindow] = useState(String(tenant.cancellation_window_hours))
@@ -559,7 +559,7 @@ function TenantConfig({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (t
 // barbershop signup form, but skips it while the typed name still matches
 // the tenant's own current name — otherwise submitting unchanged would
 // falsely show "já em uso" against itself.
-function TenantAccount({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (tenant: Tenant) => void; onBack: () => void }) {
+export function TenantAccount({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (tenant: Tenant) => void; onBack: () => void }) {
   const [name, setName] = useState(tenant.name)
   const [slug, setSlug] = useState(tenant.slug)
   const [nameStatus, setNameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle')
@@ -620,7 +620,7 @@ function TenantAccount({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (
 
 type ServiceScreen = { name: 'list' } | { name: 'detail'; id: string } | { name: 'edit'; id: string } | { name: 'create' }
 
-function ServicesManager({ services, onCreated, onUpdated, onBack }: { services: Service[]; onCreated: (service: Service) => void; onUpdated: (service: Service) => void; onBack: () => void }) {
+export function ServicesManager({ services, onCreated, onUpdated, onBack }: { services: Service[]; onCreated: (service: Service) => void; onUpdated: (service: Service) => void; onBack: () => void }) {
   const [screen, setScreen] = useState<ServiceScreen>({ name: 'list' })
   const [name, setName] = useState(''); const [duration, setDuration] = useState('30'); const [price, setPrice] = useState('')
   const [saving, setSaving] = useState(false); const [error, setError] = useState('')
@@ -737,7 +737,7 @@ type ProfessionalScreen = { name: 'list' } | { name: 'detail'; id: string } | { 
 
 type SpecialtyEntry = { enabled: boolean; price: string; duration: string }
 
-function ProfessionalsManager({ professionals, services, onCreated, onUpdated, onBack }: { professionals: Professional[]; services: Service[]; onCreated: (professional: Professional) => void; onUpdated: (professional: Professional) => void; onBack: () => void }) {
+export function ProfessionalsManager({ professionals, services, onCreated, onUpdated, onBack }: { professionals: Professional[]; services: Service[]; onCreated: (professional: Professional) => void; onUpdated: (professional: Professional) => void; onBack: () => void }) {
   const [screen, setScreen] = useState<ProfessionalScreen>({ name: 'list' })
   const [name, setName] = useState(''); const [phone, setPhone] = useState('')
   const [email, setEmail] = useState(''); const [cpf, setCpf] = useState('')
@@ -962,7 +962,7 @@ function ProfessionalsManager({ professionals, services, onCreated, onUpdated, o
 
 type ClientScreen = { name: 'list' } | { name: 'detail'; id: string } | { name: 'edit'; id: string } | { name: 'create' }
 
-function ClientsManager({ customers, onCreated, onUpdated, onBack }: { customers: Customer[]; onCreated: (customer: Customer) => void; onUpdated: (customer: Customer) => void; onBack: () => void }) {
+export function ClientsManager({ customers, onCreated, onUpdated, onBack }: { customers: Customer[]; onCreated: (customer: Customer) => void; onUpdated: (customer: Customer) => void; onBack: () => void }) {
   const [screen, setScreen] = useState<ClientScreen>({ name: 'list' })
   const [name, setName] = useState(''); const [phone, setPhone] = useState(''); const [email, setEmail] = useState('')
   const [saving, setSaving] = useState(false); const [error, setError] = useState('')
@@ -1065,7 +1065,7 @@ function ClientsManager({ customers, onCreated, onUpdated, onBack }: { customers
   </section>
 }
 
-function ReportsView({ onBack }: { onBack: () => void }) {
+export function ReportsView({ onBack }: { onBack: () => void }) {
   const now = new Date()
   const [from, setFrom] = useState(new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10))
   const [to, setTo] = useState(new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().slice(0, 10))
@@ -1114,10 +1114,10 @@ function ReportsView({ onBack }: { onBack: () => void }) {
 
 const WEEKDAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
 
-function minutesToTime(minutes: number) {
+export function minutesToTime(minutes: number) {
   return `${Math.floor(minutes / 60).toString().padStart(2, '0')}:${(minutes % 60).toString().padStart(2, '0')}`
 }
-function timeToMinutes(value: string) {
+export function timeToMinutes(value: string) {
   const [hours, minutes] = value.split(':').map(Number)
   return hours * 60 + minutes
 }
@@ -1125,7 +1125,7 @@ function timeToMinutes(value: string) {
 type ScheduleDay = { enabled: boolean; start: string; end: string }
 const DEFAULT_SCHEDULE_DAY: ScheduleDay = { enabled: false, start: '09:00', end: '18:00' }
 
-function ScheduleManager({ user, professionals }: { user: User; professionals: Professional[] }) {
+export function ScheduleManager({ user, professionals }: { user: User; professionals: Professional[] }) {
   const isManager = user.role === 'manager'
   const [professionalId, setProfessionalId] = useState(isManager ? (professionals[0]?.id ?? '') : (user.professional_id ?? ''))
   const [days, setDays] = useState<ScheduleDay[]>(Array.from({ length: 7 }, () => ({ ...DEFAULT_SCHEDULE_DAY })))
@@ -1222,7 +1222,7 @@ function ScheduleManager({ user, professionals }: { user: User; professionals: P
   </section>
 }
 
-function NewAppointment({ user, tenant, services, professionals, customers, onDone }: {
+export function NewAppointment({ user, tenant, services, professionals, customers, onDone }: {
   user: User; tenant: Tenant | null; services: Service[]; professionals: Professional[]; customers: Customer[]; onDone: () => Promise<void>
 }) {
   const isClient = user.role === 'client'
