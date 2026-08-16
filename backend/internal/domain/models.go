@@ -25,6 +25,7 @@ type Tenant struct {
 	Slug                    string    `json:"slug"`
 	SelfSchedulingEnabled   bool      `json:"self_scheduling_enabled"`
 	AutoConfirmAppointments bool      `json:"auto_confirm_appointments"`
+	CancellationWindowHours int       `json:"cancellation_window_hours"`
 	Active                  bool      `json:"active"`
 	CreatedAt               time.Time `json:"created_at"`
 }
@@ -277,12 +278,17 @@ const (
 	StatusConfirmed = "confirmed"
 	StatusCompleted = "completed"
 	StatusCancelled = "cancelled"
+	// StatusNoShow marks that the customer never showed up - distinct from
+	// StatusCancelled (which the customer or staff proactively cancelled
+	// ahead of time). Only staff/professional can set it, never the
+	// customer. Terminal, like completed/cancelled.
+	StatusNoShow = "no_show"
 )
 
 func CanTransition(from, to string) bool {
 	allowed := map[string]map[string]bool{
-		StatusScheduled: {StatusConfirmed: true, StatusCancelled: true},
-		StatusConfirmed: {StatusCompleted: true, StatusCancelled: true},
+		StatusScheduled: {StatusConfirmed: true, StatusCancelled: true, StatusNoShow: true},
+		StatusConfirmed: {StatusCompleted: true, StatusCancelled: true, StatusNoShow: true},
 	}
 	return allowed[from][to]
 }

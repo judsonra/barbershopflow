@@ -144,7 +144,7 @@ export const api = {
   logout: () => clearTokens(),
   me: () => request<User>('/auth/me'),
   tenant: () => request<Tenant>('/tenant'),
-  updateTenant: (data: { name: string; slug: string; self_scheduling_enabled: boolean; auto_confirm_appointments: boolean }) =>
+  updateTenant: (data: { name: string; slug: string; self_scheduling_enabled: boolean; auto_confirm_appointments: boolean; cancellation_window_hours: number }) =>
     request<Tenant>('/tenant', { method: 'PATCH', body: JSON.stringify(data) }),
   holidays: () => request<Holiday[]>('/tenant/holidays'),
   createHoliday: (data: { date: string; name?: string }) =>

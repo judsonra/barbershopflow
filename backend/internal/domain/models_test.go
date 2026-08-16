@@ -9,9 +9,12 @@ func TestCanTransition(t *testing.T) {
 	}{
 		{"scheduled", "confirmed", true},
 		{"scheduled", "cancelled", true},
+		{"scheduled", "no_show", true},
 		{"confirmed", "completed", true},
+		{"confirmed", "no_show", true},
 		{"completed", "scheduled", false},
 		{"cancelled", "confirmed", false},
+		{"no_show", "scheduled", false},
 	}
 	for _, tt := range tests {
 		if got := CanTransition(tt.from, tt.to); got != tt.want {

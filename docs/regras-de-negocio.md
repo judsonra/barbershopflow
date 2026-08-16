@@ -128,11 +128,15 @@ acesso a redes confiáveis.
 
 ```text
 scheduled ──> confirmed ──> completed
-     └──────────┴────────> cancelled
+     ├──────────┼────────> cancelled
+     └──────────┴────────> no_show
 ```
 
-7. `completed` e `cancelled` são estados finais.
-8. Cancelamentos liberam imediatamente o horário.
+7. `completed`, `cancelled` e `no_show` são estados finais. `no_show`
+   marca que o cliente não apareceu (diferente de `cancelled`, que é um
+   cancelamento — do cliente ou do staff — feito antes do horário); só
+   `manager`/`professional` podem marcar `no_show`, nunca o cliente.
+8. Cancelamentos e `no_show` liberam imediatamente o horário.
 9. Datas trafegam em ISO 8601/RFC 3339 com fuso. O banco armazena `timestamptz`.
 
 ### Autoagendamento
@@ -152,8 +156,26 @@ Cada barbearia liga essas duas configurações independentemente (`GET`/`PATCH
    sempre `scheduled`, como já era.
 4. Cliente só pode agendar para si mesmo: o `customer_id` do corpo da
    requisição é ignorado, a API usa sempre o cliente autenticado.
-5. Cliente não pode alterar o status do próprio agendamento (nem confirmar,
-   nem cancelar) — isso é papel do profissional/gestor.
+5. Cliente não pode confirmar nem marcar como concluído/`no_show` o próprio
+   agendamento — isso é papel do profissional/gestor. Cancelar é a única
+   transição que o cliente pode fazer, e só dentro do prazo da política de
+   cancelamento (ver seção própria abaixo).
+
+### Política de cancelamento e no-show
+
+1. Cada barbearia define `cancellation_window_hours` (`GET`/`PATCH
+   /api/v1/tenant`, só `manager`): quantas horas antes do início o cliente
+   ainda pode cancelar o próprio agendamento. `0` (padrão) é sem restrição
+   — cliente pode cancelar a qualquer momento antes do início.
+2. Dentro do prazo (agora + `cancellation_window_hours` já passou do
+   início), `PATCH /appointments/{id}/status` com `status=cancelled`
+   responde `403` para o cliente; fora do prazo, cancela normalmente.
+3. O prazo só vale para o autocancelamento do cliente — staff/profissional
+   sempre podem cancelar (ou marcar `no_show`) a qualquer momento,
+   independente da configuração.
+4. `no_show` é responsabilidade exclusiva do profissional/gestor: marca
+   que o cliente não apareceu, para diferenciar de um cancelamento
+   avisado com antecedência (útil para relatórios futuros).
 
 ### Relatórios
 
@@ -180,7 +202,6 @@ padrão: mês corrente.
 
 - Lembretes por WhatsApp/e-mail.
 - Sinal, pagamentos, caixa, comissões, cupons e programa de fidelidade.
-- Política configurável de cancelamento e no-show.
 - LGPD: consentimento, exportação, anonimização e trilha de auditoria.
 
 ## Critérios de aceite do MVP

@@ -37,6 +37,7 @@ type Store interface {
 	CreateAppointment(ctx context.Context, tenantID, status string, item domain.Appointment) (domain.Appointment, error)
 	UpdateAppointmentStatus(ctx context.Context, tenantID, id, status string) (domain.Appointment, error)
 	GetAppointmentProfessionalID(ctx context.Context, tenantID, id string) (string, error)
+	GetAppointmentForCancellation(ctx context.Context, tenantID, id string) (customerID string, startsAt time.Time, err error)
 	FindIdentityByEmail(context.Context, string) (domain.Identity, error)
 	FindIdentityByPhone(context.Context, string) (domain.Identity, error)
 	FindIdentityByGoogleID(context.Context, string) (domain.Identity, error)
@@ -62,7 +63,7 @@ type Store interface {
 	ListTenants(ctx context.Context) ([]domain.Tenant, error)
 	GetFirstManagerByTenant(ctx context.Context, tenantID string) (domain.User, error)
 	GetTenantByID(ctx context.Context, id string) (domain.Tenant, error)
-	UpdateTenant(ctx context.Context, tenantID, name, slug string, selfSchedulingEnabled, autoConfirmAppointments bool) (domain.Tenant, error)
+	UpdateTenant(ctx context.Context, tenantID, name, slug string, selfSchedulingEnabled, autoConfirmAppointments bool, cancellationWindowHours int) (domain.Tenant, error)
 	ListHolidays(ctx context.Context, tenantID string) ([]domain.Holiday, error)
 	CreateHoliday(ctx context.Context, tenantID string, item domain.Holiday) (domain.Holiday, error)
 	DeleteHoliday(ctx context.Context, tenantID, id string) error
@@ -721,6 +722,7 @@ func (s *server) updateTenant(w http.ResponseWriter, r *http.Request) {
 		Slug                    string `json:"slug"`
 		SelfSchedulingEnabled   bool   `json:"self_scheduling_enabled"`
 		AutoConfirmAppointments bool   `json:"auto_confirm_appointments"`
+		CancellationWindowHours int    `json:"cancellation_window_hours"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -735,8 +737,12 @@ func (s *server) updateTenant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation_error", "slug deve conter apenas letras minúsculas, números e hífen")
 		return
 	}
+	if body.CancellationWindowHours < 0 {
+		writeError(w, http.StatusBadRequest, "validation_error", "prazo de cancelamento não pode ser negativo")
+		return
+	}
 	claims, _ := claimsFromContext(r)
-	tenant, err := s.store.UpdateTenant(r.Context(), claims.TenantID, body.Name, body.Slug, body.SelfSchedulingEnabled, body.AutoConfirmAppointments)
+	tenant, err := s.store.UpdateTenant(r.Context(), claims.TenantID, body.Name, body.Slug, body.SelfSchedulingEnabled, body.AutoConfirmAppointments, body.CancellationWindowHours)
 	respond(w, tenant, err)
 }
 
@@ -1334,8 +1340,28 @@ func (s *server) updateStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	claims, _ := claimsFromContext(r)
 	if claims.Role == domain.RoleClient {
-		writeError(w, http.StatusForbidden, "forbidden", "cliente não pode alterar o status do agendamento; aguarde a confirmação do profissional")
-		return
+		if body.Status != domain.StatusCancelled {
+			writeError(w, http.StatusForbidden, "forbidden", "cliente só pode cancelar o próprio agendamento")
+			return
+		}
+		customerID, startsAt, err := s.store.GetAppointmentForCancellation(r.Context(), claims.TenantID, id)
+		if err != nil {
+			handleError(w, err)
+			return
+		}
+		if customerID != claims.CustomerID {
+			writeError(w, http.StatusForbidden, "forbidden", "sem permissão para alterar este agendamento")
+			return
+		}
+		tenant, err := s.store.GetTenantByID(r.Context(), claims.TenantID)
+		if err != nil {
+			handleError(w, err)
+			return
+		}
+		if tenant.CancellationWindowHours > 0 && time.Until(startsAt) < time.Duration(tenant.CancellationWindowHours)*time.Hour {
+			writeError(w, http.StatusForbidden, "forbidden", fmt.Sprintf("cancelamento só é permitido até %d horas antes do horário", tenant.CancellationWindowHours))
+			return
+		}
 	}
 	if claims.Role == domain.RoleProfessional {
 		professionalID, err := s.store.GetAppointmentProfessionalID(r.Context(), claims.TenantID, id)
