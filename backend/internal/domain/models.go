@@ -244,3 +244,54 @@ func CanTransition(from, to string) bool {
 	}
 	return allowed[from][to]
 }
+
+// ProfessionalOccupancy is one professional's booked-vs-available minutes
+// within a report period. Professionals with no configured
+// professional_schedules are left out entirely (see OccupancyReport) since
+// their available capacity is undefined, not zero.
+type ProfessionalOccupancy struct {
+	ProfessionalID   string  `json:"professional_id"`
+	ProfessionalName string  `json:"professional_name"`
+	AvailableMinutes int     `json:"available_minutes"`
+	BookedMinutes    int     `json:"booked_minutes"`
+	Rate             float64 `json:"rate"`
+}
+
+// OccupancyReport aggregates ProfessionalOccupancy. OverallRate is booked
+// over available across every included professional combined - it is not
+// an average of each professional's individual rate, so periods differ in
+// weight by how much capacity each professional actually has.
+type OccupancyReport struct {
+	OverallRate    float64                  `json:"overall_rate"`
+	ByProfessional []ProfessionalOccupancy `json:"by_professional"`
+}
+
+type ProfessionalRevenue struct {
+	ProfessionalID   string `json:"professional_id"`
+	ProfessionalName string `json:"professional_name"`
+	TotalCents       int64  `json:"total_cents"`
+}
+
+// RevenueReport counts only StatusCompleted appointments - revenue that
+// was actually realized, not merely scheduled/confirmed.
+type RevenueReport struct {
+	TotalCents     int64                  `json:"total_cents"`
+	ByProfessional []ProfessionalRevenue `json:"by_professional"`
+}
+
+// RetentionReport measures repeat-customer rate: among customers with a
+// completed appointment in the report period, how many already had a
+// completed appointment before the period started.
+type RetentionReport struct {
+	TotalCustomers     int     `json:"total_customers"`
+	ReturningCustomers int     `json:"returning_customers"`
+	Rate               float64 `json:"rate"`
+}
+
+type Report struct {
+	From      time.Time       `json:"from"`
+	To        time.Time       `json:"to"`
+	Occupancy OccupancyReport `json:"occupancy"`
+	Revenue   RevenueReport   `json:"revenue"`
+	Retention RetentionReport `json:"retention"`
+}

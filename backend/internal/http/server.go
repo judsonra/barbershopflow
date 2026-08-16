@@ -31,6 +31,7 @@ type Store interface {
 	GetCustomerByID(ctx context.Context, tenantID, id string) (domain.Customer, error)
 	UpdateCustomerPhone(ctx context.Context, tenantID, customerID, phone string) error
 	ListAppointments(ctx context.Context, tenantID, customerID, professionalID string, from, to time.Time) ([]domain.Appointment, error)
+	GetReport(ctx context.Context, tenantID string, from, to time.Time) (domain.Report, error)
 	CreateAppointment(ctx context.Context, tenantID, status string, item domain.Appointment) (domain.Appointment, error)
 	UpdateAppointmentStatus(ctx context.Context, tenantID, id, status string) (domain.Appointment, error)
 	GetAppointmentProfessionalID(ctx context.Context, tenantID, id string) (string, error)
@@ -127,6 +128,7 @@ func New(store Store, cfg Config) http.Handler {
 	protected.HandleFunc("PATCH /api/v1/customers/{id}", s.requireStaff(s.updateCustomer))
 	protected.HandleFunc("POST /api/v1/customers/{id}/credentials", s.requireStaff(s.grantCustomerAccess))
 	protected.HandleFunc("GET /api/v1/appointments", s.listAppointments)
+	protected.HandleFunc("GET /api/v1/reports", s.requireRole(domain.RoleManager, s.getReport))
 	protected.HandleFunc("POST /api/v1/appointments", s.createAppointment)
 	protected.HandleFunc("PATCH /api/v1/appointments/{id}/status", s.updateStatus)
 
@@ -1106,6 +1108,26 @@ func (s *server) listAppointments(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := s.store.ListAppointments(r.Context(), claims.TenantID, customerFilter, professionalFilter, from, to)
 	respond(w, items, err)
+}
+
+// getReport defaults to the current calendar month, unlike
+// listAppointments (which defaults to today) - a report is normally read
+// over a longer window than the daily agenda.
+func (s *server) getReport(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	from, err := parseTime(r.URL.Query().Get("from"), time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()))
+	if err != nil {
+		writeError(w, 400, "validation_error", "from inválido")
+		return
+	}
+	to, err := parseTime(r.URL.Query().Get("to"), from.AddDate(0, 1, 0))
+	if err != nil || !to.After(from) {
+		writeError(w, 400, "validation_error", "to inválido")
+		return
+	}
+	claims, _ := claimsFromContext(r)
+	report, err := s.store.GetReport(r.Context(), claims.TenantID, from, to)
+	respond(w, report, err)
 }
 
 // createAppointment is shared by staff (booking for any customer, always

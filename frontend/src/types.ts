@@ -19,3 +19,11 @@ export type Appointment = {
   ends_at: string; status: 'scheduled' | 'confirmed' | 'completed' | 'cancelled';
   notes?: string; price_cents: number
 }
+export type ProfessionalOccupancy = { professional_id: string; professional_name: string; available_minutes: number; booked_minutes: number; rate: number }
+export type ProfessionalRevenue = { professional_id: string; professional_name: string; total_cents: number }
+export type Report = {
+  from: string; to: string
+  occupancy: { overall_rate: number; by_professional: ProfessionalOccupancy[] }
+  revenue: { total_cents: number; by_professional: ProfessionalRevenue[] }
+  retention: { total_customers: number; returning_customers: number; rate: number }
+}

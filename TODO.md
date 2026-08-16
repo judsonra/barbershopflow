@@ -44,7 +44,7 @@ atual (backend Go, frontend React/PWA, infra Docker).
 - [ ] Sinal/pagamento antecipado, caixa, comissões, cupons, fidelidade
 - [ ] Política configurável de cancelamento e no-show
 - [ ] LGPD: consentimento, exportação de dados, anonimização, trilha de auditoria
-- [ ] Relatórios de ocupação, faturamento e retenção
+- [x] Relatórios de ocupação, faturamento e retenção: `GET /reports?from=&to=` (só `manager`) agrega os três sobre dados já existentes, sem tabela nova. Ocupação só considera profissionais com jornada configurada (capacidade indefinida sem ela); faturamento soma só agendamentos `completed`; retenção é taxa de clientes recorrentes (já tinham `completed` antes do período, entre os atendidos no período). Aba "Relatórios" em Config, com seletor de período (padrão: mês corrente)
 
 ## 4. Melhorias técnicas / infraestrutura
 

@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './api'
 import { downloadICS, googleCalendarUrl } from './calendar'
 import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
-import type { AdminCustomerMatch, Appointment, Customer, MembershipOption, Professional, Service, Tenant, TimeOff, User } from './types'
+import type { AdminCustomerMatch, Appointment, Customer, MembershipOption, Professional, Report, Service, Tenant, TimeOff, User } from './types'
 
 function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : 'Erro inesperado'
@@ -305,7 +305,7 @@ function Login({ onLogin, initialError, initialChoice }: {
 function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   const isClient = user.role === 'client'
   const [tab, setTab] = useState<'agenda' | 'new' | 'config' | 'hours' | 'profile'>('agenda')
-  const [configView, setConfigView] = useState<'menu' | 'agenda' | 'services' | 'professionals' | 'clients'>('menu')
+  const [configView, setConfigView] = useState<'menu' | 'agenda' | 'services' | 'professionals' | 'clients' | 'reports'>('menu')
   const [offset, setOffset] = useState(0)
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [services, setServices] = useState<Service[]>([])
@@ -403,6 +403,7 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
           onUpdated={p => setProfessionals(v => v.map(x => x.id === p.id ? p : x))} onBack={() => setConfigView('menu')} />}
         {configView === 'clients' && <ClientsManager customers={customers} onCreated={c => setCustomers(v => [...v, c])}
           onUpdated={c => setCustomers(v => v.map(x => x.id === c.id ? c : x))} onBack={() => setConfigView('menu')} />}
+        {configView === 'reports' && <ReportsView onBack={() => setConfigView('menu')} />}
       </>}
       {tab === 'hours' && <ScheduleManager user={user} professionals={professionals} />}
       {tab === 'profile' && <Profile user={user} onLogout={onLogout} onBack={() => setTab('agenda')} />}
@@ -423,13 +424,14 @@ function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   </div>
 }
 
-function ConfigMenu({ onSelect }: { onSelect: (view: 'agenda' | 'services' | 'professionals' | 'clients') => void }) {
+function ConfigMenu({ onSelect }: { onSelect: (view: 'agenda' | 'services' | 'professionals' | 'clients' | 'reports') => void }) {
   return <section className="form-page"><span className="eyebrow">CONFIGURAÇÕES</span><h2>Config</h2>
     <ul className="tenant-list">
       <li role="button" tabIndex={0} onClick={() => onSelect('agenda')}><div><b>Agenda</b><small>Autoagendamento e confirmação</small></div></li>
       <li role="button" tabIndex={0} onClick={() => onSelect('services')}><div><b>Serviços</b><small>Cadastro de serviços</small></div></li>
       <li role="button" tabIndex={0} onClick={() => onSelect('professionals')}><div><b>Profissionais</b><small>Cadastro de profissionais</small></div></li>
       <li role="button" tabIndex={0} onClick={() => onSelect('clients')}><div><b>Clientes</b><small>Cadastro de clientes</small></div></li>
+      <li role="button" tabIndex={0} onClick={() => onSelect('reports')}><div><b>Relatórios</b><small>Ocupação, faturamento e retenção</small></div></li>
     </ul>
   </section>
 }
@@ -821,6 +823,53 @@ function ClientsManager({ customers, onCreated, onUpdated, onBack }: { customers
       <button disabled={saving}>{saving ? 'Adicionando…' : 'Adicionar cliente'}</button>
       <button type="button" onClick={() => setScreen({ name: 'list' })}>Cancelar</button>
     </form>}
+  </section>
+}
+
+function ReportsView({ onBack }: { onBack: () => void }) {
+  const now = new Date()
+  const [from, setFrom] = useState(new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10))
+  const [to, setTo] = useState(new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().slice(0, 10))
+  const [report, setReport] = useState<Report | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
+    try { setReport(await api.report(new Date(from).toISOString(), new Date(to).toISOString())) }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setLoading(false) }
+  }, [from, to])
+
+  useEffect(() => { void load() }, [load])
+
+  return <section className="form-page"><span className="eyebrow">CONFIGURAÇÕES</span><h2>Relatórios</h2>
+    {error && <div className="alert">{error}</div>}
+    <div className="quick">
+      <label>De<input type="date" lang="pt-BR" value={from} onChange={e => setFrom(e.target.value)} /></label>
+      <label>Até<input type="date" lang="pt-BR" value={to} onChange={e => setTo(e.target.value)} /></label>
+    </div>
+    {loading ? <p>Carregando…</p> : report && <>
+      <h3>Ocupação</h3>
+      <p>Taxa geral: <b>{(report.occupancy.overall_rate * 100).toFixed(0)}%</b></p>
+      {report.occupancy.by_professional.length === 0 ? <p>Nenhum profissional com jornada configurada no período.</p> : <ul className="tenant-list">
+        {report.occupancy.by_professional.map(p => <li key={p.professional_id}>
+          <div><b>{p.professional_name}</b><small>{Math.round(p.booked_minutes / 60)}h ocupadas de {Math.round(p.available_minutes / 60)}h disponíveis · {(p.rate * 100).toFixed(0)}%</small></div>
+        </li>)}
+      </ul>}
+
+      <h3>Faturamento</h3>
+      <p>Total: <b>{money.format(report.revenue.total_cents / 100)}</b></p>
+      {report.revenue.by_professional.length === 0 ? <p>Nenhum atendimento concluído no período.</p> : <ul className="tenant-list">
+        {report.revenue.by_professional.map(p => <li key={p.professional_id}>
+          <div><b>{p.professional_name}</b><small>{money.format(p.total_cents / 100)}</small></div>
+        </li>)}
+      </ul>}
+
+      <h3>Retenção</h3>
+      <p>{report.retention.returning_customers} de {report.retention.total_customers} clientes atendidos já eram clientes antes do período (<b>{(report.retention.rate * 100).toFixed(0)}%</b>).</p>
+    </>}
+    <button type="button" className="link-button" onClick={onBack}>Voltar</button>
   </section>
 }
 

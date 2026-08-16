@@ -143,6 +143,27 @@ Cada barbearia liga essas duas configurações independentemente (`GET`/`PATCH
 5. Cliente não pode alterar o status do próprio agendamento (nem confirmar,
    nem cancelar) — isso é papel do profissional/gestor.
 
+### Relatórios
+
+`GET /api/v1/reports?from=&to=` (só `manager`) agrega três métricas sobre
+os dados já existentes de agendamentos/clientes, sem tabela nova. Período
+padrão: mês corrente.
+
+1. **Ocupação**: minutos ocupados vs. minutos disponíveis, por
+   profissional e no total. Só entram profissionais com jornada
+   configurada (`professional_schedules`) — sem jornada, a capacidade
+   disponível é indefinida, não zero, mesma regra retrocompatível usada na
+   criação de agendamento. Disponível = janela da jornada em cada dia do
+   período, descontando sobreposição com bloqueios (`professional_time_off`).
+   Ocupado = soma da duração de todo agendamento não `cancelled` no
+   período (inclui `scheduled`/`confirmed`, que já bloqueiam a agenda,
+   além de `completed`).
+2. **Faturamento**: soma de `price_cents` só dos agendamentos `completed`
+   no período — receita realizada, não a agendada/pendente.
+3. **Retenção**: entre os clientes com um `completed` no período, qual
+   fração já tinha algum `completed` anterior ao início do período (taxa
+   de clientes recorrentes).
+
 ## Fora do MVP, mas previsto
 
 - Jornada de trabalho, bloqueios, folgas e feriados.
@@ -151,7 +172,6 @@ Cada barbearia liga essas duas configurações independentemente (`GET`/`PATCH
 - Sinal, pagamentos, caixa, comissões, cupons e programa de fidelidade.
 - Política configurável de cancelamento e no-show.
 - LGPD: consentimento, exportação, anonimização e trilha de auditoria.
-- Relatórios de ocupação, faturamento e retenção.
 
 ## Critérios de aceite do MVP
 

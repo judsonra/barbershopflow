@@ -355,6 +355,136 @@ func (r *Repository) ListAppointments(ctx context.Context, tenantID, customerID,
 	return items, rows.Err()
 }
 
+// GetReport aggregates occupancy, revenue and retention over
+// [from, to) - all read-only, no new tables. Occupancy walks each day in
+// range against professional_schedules/professional_time_off in Go
+// (professionals with no schedule configured are skipped - their capacity
+// is undefined, not zero, same retrocompatible rule CreateAppointment
+// already applies for booking). Revenue and retention are single
+// aggregate queries.
+func (r *Repository) GetReport(ctx context.Context, tenantID string, from, to time.Time) (domain.Report, error) {
+	report := domain.Report{From: from, To: to}
+	report.Occupancy.ByProfessional = []domain.ProfessionalOccupancy{}
+	report.Revenue.ByProfessional = []domain.ProfessionalRevenue{}
+
+	professionals, err := r.ListProfessionals(ctx, tenantID)
+	if err != nil {
+		return report, err
+	}
+	professionalNames := make(map[string]string, len(professionals))
+	for _, professional := range professionals {
+		professionalNames[professional.ID] = professional.Name
+	}
+
+	var totalAvailable, totalBooked int
+	for _, professional := range professionals {
+		schedule, err := r.GetProfessionalSchedule(ctx, tenantID, professional.ID)
+		if err != nil {
+			return report, err
+		}
+		if len(schedule) == 0 {
+			continue
+		}
+		windowByWeekday := make(map[int][2]int, len(schedule))
+		for _, entry := range schedule {
+			windowByWeekday[entry.Weekday] = [2]int{entry.StartMinute, entry.EndMinute}
+		}
+		timeOff, err := r.ListTimeOff(ctx, tenantID, professional.ID, from, to)
+		if err != nil {
+			return report, err
+		}
+
+		available := 0
+		for day := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location()); day.Before(to); day = day.AddDate(0, 0, 1) {
+			window, ok := windowByWeekday[int(day.Weekday())]
+			if !ok {
+				continue
+			}
+			dayStart := day.Add(time.Duration(window[0]) * time.Minute)
+			dayEnd := day.Add(time.Duration(window[1]) * time.Minute)
+			minutes := window[1] - window[0]
+			for _, block := range timeOff {
+				overlapStart, overlapEnd := block.StartsAt, block.EndsAt
+				if dayStart.After(overlapStart) {
+					overlapStart = dayStart
+				}
+				if dayEnd.Before(overlapEnd) {
+					overlapEnd = dayEnd
+				}
+				if overlapEnd.After(overlapStart) {
+					minutes -= int(overlapEnd.Sub(overlapStart).Minutes())
+				}
+			}
+			if minutes > 0 {
+				available += minutes
+			}
+		}
+
+		var booked float64
+		if err := r.db.QueryRow(ctx, `
+			SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ends_at-starts_at))/60),0) FROM appointments
+			WHERE tenant_id=$1 AND professional_id=$2 AND status <> 'cancelled' AND starts_at>=$3 AND starts_at<$4`,
+			tenantID, professional.ID, from, to).Scan(&booked); err != nil {
+			return report, err
+		}
+		bookedMinutes := int(booked)
+
+		rate := 0.0
+		if available > 0 {
+			rate = float64(bookedMinutes) / float64(available)
+		}
+		report.Occupancy.ByProfessional = append(report.Occupancy.ByProfessional, domain.ProfessionalOccupancy{
+			ProfessionalID: professional.ID, ProfessionalName: professional.Name,
+			AvailableMinutes: available, BookedMinutes: bookedMinutes, Rate: rate,
+		})
+		totalAvailable += available
+		totalBooked += bookedMinutes
+	}
+	if totalAvailable > 0 {
+		report.Occupancy.OverallRate = float64(totalBooked) / float64(totalAvailable)
+	}
+
+	rows, err := r.db.Query(ctx, `
+		SELECT professional_id, SUM(price_cents) FROM appointments
+		WHERE tenant_id=$1 AND status='completed' AND starts_at>=$2 AND starts_at<$3
+		GROUP BY professional_id`, tenantID, from, to)
+	if err != nil {
+		return report, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var professionalID string
+		var cents int64
+		if err := rows.Scan(&professionalID, &cents); err != nil {
+			return report, err
+		}
+		report.Revenue.TotalCents += cents
+		report.Revenue.ByProfessional = append(report.Revenue.ByProfessional, domain.ProfessionalRevenue{
+			ProfessionalID: professionalID, ProfessionalName: professionalNames[professionalID], TotalCents: cents,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return report, err
+	}
+
+	if err := r.db.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT a.customer_id),
+		       COUNT(DISTINCT a.customer_id) FILTER (WHERE EXISTS (
+		         SELECT 1 FROM appointments b
+		         WHERE b.tenant_id=a.tenant_id AND b.customer_id=a.customer_id AND b.status='completed' AND b.starts_at < $2
+		       ))
+		FROM appointments a
+		WHERE a.tenant_id=$1 AND a.status='completed' AND a.starts_at>=$2 AND a.starts_at<$3`,
+		tenantID, from, to).Scan(&report.Retention.TotalCustomers, &report.Retention.ReturningCustomers); err != nil {
+		return report, err
+	}
+	if report.Retention.TotalCustomers > 0 {
+		report.Retention.Rate = float64(report.Retention.ReturningCustomers) / float64(report.Retention.TotalCustomers)
+	}
+
+	return report, nil
+}
+
 // CreateAppointment inserts with the given initial status: staff-created
 // appointments always pass domain.StatusScheduled; client self-scheduling
 // passes StatusConfirmed instead when the tenant's auto-confirm setting is
