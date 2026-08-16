@@ -25,6 +25,8 @@ type Notifier interface {
 	SendPassword(ctx context.Context, phone, password, channel string) error
 }
 
+const zenviaBaseURL = "https://api.zenvia.com"
+
 func New(apiToken, fromSMS, fromWhatsApp string) Notifier {
 	if apiToken == "" {
 		return logNotifier{}
@@ -34,6 +36,7 @@ func New(apiToken, fromSMS, fromWhatsApp string) Notifier {
 		fromSMS:      fromSMS,
 		fromWhatsApp: fromWhatsApp,
 		client:       &http.Client{Timeout: 10 * time.Second},
+		baseURL:      zenviaBaseURL,
 	}
 }
 
@@ -53,6 +56,7 @@ type zenviaNotifier struct {
 	fromSMS      string
 	fromWhatsApp string
 	client       *http.Client
+	baseURL      string
 }
 
 func (z *zenviaNotifier) SendPassword(ctx context.Context, phone, password, channel string) error {
@@ -71,7 +75,7 @@ func (z *zenviaNotifier) SendPassword(ctx context.Context, phone, password, chan
 	if err != nil {
 		return err
 	}
-	url := fmt.Sprintf("https://api.zenvia.com/v2/channels/%s/messages", channel)
+	url := fmt.Sprintf("%s/v2/channels/%s/messages", z.baseURL, channel)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return err

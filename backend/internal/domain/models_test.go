@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestCanTransition(t *testing.T) {
 	tests := []struct {
@@ -48,5 +51,41 @@ func TestValidCPF(t *testing.T) {
 func TestDigitsOnly(t *testing.T) {
 	if got := DigitsOnly("111.444.777-35"); got != "11144477735" {
 		t.Errorf("DigitsOnly() = %q, want %q", got, "11144477735")
+	}
+}
+
+func TestUserLocked(t *testing.T) {
+	tests := []struct {
+		name     string
+		lockedAt time.Time
+		want     bool
+	}{
+		{"zero value is not locked", time.Time{}, false},
+		{"non-zero value is locked", time.Now(), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := (User{LockedAt: tt.lockedAt}).Locked(); got != tt.want {
+				t.Errorf("User.Locked() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIdentityLocked(t *testing.T) {
+	tests := []struct {
+		name     string
+		lockedAt time.Time
+		want     bool
+	}{
+		{"zero value is not locked", time.Time{}, false},
+		{"non-zero value is locked", time.Now(), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := (Identity{LockedAt: tt.lockedAt}).Locked(); got != tt.want {
+				t.Errorf("Identity.Locked() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
