@@ -14,6 +14,7 @@ export type TimeOff = { id: string; professional_id: string; starts_at: string; 
 export type ProfessionalService = { service_id: string; price_cents_override?: number | null; duration_minutes_override?: number | null }
 export type Holiday = { id: string; date: string; name?: string }
 export type Customer = { id: string; name: string; phone?: string; email?: string; active: boolean }
+export type CustomerPage = { items: Customer[]; total: number }
 export type AdminCustomerMatch = Customer & { tenant_id: string; tenant_name: string; tenant_slug: string }
 export type ImpersonationAuditEntry = {
   id: string; actor_name: string; actor_email?: string

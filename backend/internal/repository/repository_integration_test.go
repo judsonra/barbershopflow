@@ -374,3 +374,61 @@ func TestUniqueViolationMapping_Integration(t *testing.T) {
 		}
 	})
 }
+
+func TestListCustomers_Pagination_Integration(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	tenantID := newTestTenant(t, repo)
+
+	// Alphabetical names so page boundaries are deterministic against the
+	// real ORDER BY name.
+	names := []string{"Ana", "Bruno", "Carla", "Diego", "Elis"}
+	for _, name := range names {
+		if _, err := repo.CreateCustomer(ctx, tenantID, domain.Customer{Name: name}); err != nil {
+			t.Fatalf("create customer %s: %v", name, err)
+		}
+	}
+
+	t.Run("no pagination returns everything", func(t *testing.T) {
+		got, err := repo.ListCustomers(ctx, tenantID, 0, 0)
+		if err != nil {
+			t.Fatalf("ListCustomers: %v", err)
+		}
+		if len(got.Items) != 5 || got.Total != 5 {
+			t.Fatalf("expected 5 items and total=5, got %+v", got)
+		}
+	})
+
+	t.Run("page 1 of 2", func(t *testing.T) {
+		got, err := repo.ListCustomers(ctx, tenantID, 1, 2)
+		if err != nil {
+			t.Fatalf("ListCustomers: %v", err)
+		}
+		if got.Total != 5 {
+			t.Fatalf("expected total=5 regardless of page size, got %d", got.Total)
+		}
+		if len(got.Items) != 2 || got.Items[0].Name != "Ana" || got.Items[1].Name != "Bruno" {
+			t.Fatalf("expected [Ana, Bruno] on page 1, got %+v", got.Items)
+		}
+	})
+
+	t.Run("page 2 of 2, no overlap with page 1", func(t *testing.T) {
+		got, err := repo.ListCustomers(ctx, tenantID, 2, 2)
+		if err != nil {
+			t.Fatalf("ListCustomers: %v", err)
+		}
+		if len(got.Items) != 2 || got.Items[0].Name != "Carla" || got.Items[1].Name != "Diego" {
+			t.Fatalf("expected [Carla, Diego] on page 2, got %+v", got.Items)
+		}
+	})
+
+	t.Run("last page has the remainder", func(t *testing.T) {
+		got, err := repo.ListCustomers(ctx, tenantID, 3, 2)
+		if err != nil {
+			t.Fatalf("ListCustomers: %v", err)
+		}
+		if len(got.Items) != 1 || got.Items[0].Name != "Elis" {
+			t.Fatalf("expected just [Elis] on the last page, got %+v", got.Items)
+		}
+	})
+}

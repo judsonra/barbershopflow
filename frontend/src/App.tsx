@@ -434,7 +434,7 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
           onUpdated={s => setServices(v => v.map(x => x.id === s.id ? s : x))} onBack={() => setConfigView('menu')} />}
         {configView === 'professionals' && <ProfessionalsManager professionals={professionals} services={services} onCreated={p => setProfessionals(v => [...v, p])}
           onUpdated={p => setProfessionals(v => v.map(x => x.id === p.id ? p : x))} onBack={() => setConfigView('menu')} />}
-        {configView === 'clients' && <ClientsManager customers={customers} onCreated={c => setCustomers(v => [...v, c])}
+        {configView === 'clients' && <ClientsManager onCreated={c => setCustomers(v => [...v, c])}
           onUpdated={c => setCustomers(v => v.map(x => x.id === c.id ? c : x))} onBack={() => setConfigView('menu')} />}
         {configView === 'reports' && <ReportsView onBack={() => setConfigView('menu')} />}
       </>}
@@ -962,13 +962,31 @@ export function ProfessionalsManager({ professionals, services, onCreated, onUpd
 
 type ClientScreen = { name: 'list' } | { name: 'detail'; id: string } | { name: 'edit'; id: string } | { name: 'create' }
 
-export function ClientsManager({ customers, onCreated, onUpdated, onBack }: { customers: Customer[]; onCreated: (customer: Customer) => void; onUpdated: (customer: Customer) => void; onBack: () => void }) {
+const CLIENTS_PAGE_SIZE = 20
+
+export function ClientsManager({ onCreated, onUpdated, onBack }: { onCreated: (customer: Customer) => void; onUpdated: (customer: Customer) => void; onBack: () => void }) {
   const [screen, setScreen] = useState<ClientScreen>({ name: 'list' })
+  const [page, setPage] = useState(1)
+  const [items, setItems] = useState<Customer[]>([])
+  const [total, setTotal] = useState(0)
+  const [listLoading, setListLoading] = useState(true)
   const [name, setName] = useState(''); const [phone, setPhone] = useState(''); const [email, setEmail] = useState('')
   const [saving, setSaving] = useState(false); const [error, setError] = useState('')
   const [editName, setEditName] = useState(''); const [editPhone, setEditPhone] = useState(''); const [editEmail, setEditEmail] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+
+  const loadPage = useCallback(async () => {
+    setListLoading(true)
+    try {
+      const result = await api.customersPage(page, CLIENTS_PAGE_SIZE)
+      setItems(result.items); setTotal(result.total)
+    }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setListLoading(false) }
+  }, [page])
+
+  useEffect(() => { void loadPage() }, [loadPage])
 
   function startCreate() {
     setName(''); setPhone(''); setEmail(''); setError('')
@@ -981,6 +999,7 @@ export function ClientsManager({ customers, onCreated, onUpdated, onBack }: { cu
     setSaving(true)
     try {
       onCreated(await api.createCustomer({ name, phone: toE164BR(phone), email }))
+      await loadPage()
       setScreen({ name: 'list' })
     }
     catch (err) { setError(errorMessage(err)) }
@@ -998,11 +1017,12 @@ export function ClientsManager({ customers, onCreated, onUpdated, onBack }: { cu
   async function submitEdit(event: FormEvent) {
     event.preventDefault(); setError('')
     if (screen.name !== 'edit') return
-    const customer = customers.find(c => c.id === screen.id); if (!customer) return
+    const customer = items.find(c => c.id === screen.id); if (!customer) return
     if (editEmail.trim() && !isValidEmail(editEmail.trim())) { setError('Informe um e-mail válido ou deixe em branco.'); return }
     setEditSaving(true)
     try {
       onUpdated(await api.updateCustomer(customer.id, { name: editName.trim(), phone: toE164BR(editPhone), email: editEmail.trim(), active: customer.active }))
+      await loadPage()
       setScreen({ name: 'detail', id: customer.id })
     }
     catch (err) { setError(errorMessage(err)) }
@@ -1013,24 +1033,31 @@ export function ClientsManager({ customers, onCreated, onUpdated, onBack }: { cu
     setError(''); setTogglingId(customer.id)
     try {
       onUpdated(await api.updateCustomer(customer.id, { name: customer.name, phone: customer.phone, email: customer.email, active: !customer.active }))
+      await loadPage()
       setScreen({ name: 'list' })
     }
     catch (err) { setError(errorMessage(err)) }
     finally { setTogglingId(null) }
   }
 
-  const detailCustomer = screen.name === 'detail' ? customers.find(c => c.id === screen.id) : undefined
+  const detailCustomer = screen.name === 'detail' ? items.find(c => c.id === screen.id) : undefined
+  const totalPages = Math.max(1, Math.ceil(total / CLIENTS_PAGE_SIZE))
 
   return <section className="form-page">
     <span className="eyebrow">CONFIGURAÇÕES</span><h2>Clientes</h2>
     {error && <div className="alert">{error}</div>}
 
     {screen.name === 'list' && <>
-      {customers.length === 0 ? <p>Nenhum cliente cadastrado.</p> : <ul className="tenant-list">
-        {customers.map(c => <li key={c.id} role="button" tabIndex={0} onClick={() => setScreen({ name: 'detail', id: c.id })}>
+      {listLoading ? <p>Carregando…</p> : items.length === 0 ? <p>Nenhum cliente cadastrado.</p> : <ul className="tenant-list">
+        {items.map(c => <li key={c.id} role="button" tabIndex={0} onClick={() => setScreen({ name: 'detail', id: c.id })}>
           <div><b>{c.name}</b>{!c.active && <small> · inativo</small>}{(c.email || c.phone) && <small> · {[c.email, c.phone].filter(Boolean).join(' · ')}</small>}</div>
         </li>)}
       </ul>}
+      {totalPages > 1 && <section className="date-nav">
+        <button aria-label="Página anterior" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>‹</button>
+        <div><b>Página {page} de {totalPages}</b><small>{total} cliente(s)</small></div>
+        <button aria-label="Próxima página" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>›</button>
+      </section>}
       <button type="button" className="link-button" onClick={onBack}>Voltar</button>
       <button className="fab" aria-label="Novo cliente" title="Novo cliente" onClick={startCreate}>+</button>
     </>}

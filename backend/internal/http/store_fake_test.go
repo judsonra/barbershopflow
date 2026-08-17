@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -180,15 +181,28 @@ func (s *fakeStore) UpdateProfessionalPhone(_ context.Context, tenantID, profess
 
 // --- customers ---
 
-func (s *fakeStore) ListCustomers(_ context.Context, tenantID string) ([]domain.Customer, error) {
+func (s *fakeStore) ListCustomers(_ context.Context, tenantID string, page, limit int) (domain.CustomerPage, error) {
 	if err := s.err("ListCustomers"); err != nil {
-		return nil, err
+		return domain.CustomerPage{}, err
 	}
 	out := make([]domain.Customer, 0, len(s.customers[tenantID]))
 	for _, v := range s.customers[tenantID] {
 		out = append(out, v)
 	}
-	return out, nil
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	total := len(out)
+	if limit <= 0 {
+		return domain.CustomerPage{Items: out, Total: total}, nil
+	}
+	start := (page - 1) * limit
+	if start > total {
+		start = total
+	}
+	end := start + limit
+	if end > total {
+		end = total
+	}
+	return domain.CustomerPage{Items: out[start:end], Total: total}, nil
 }
 
 func (s *fakeStore) SearchCustomersGlobal(_ context.Context, query string) ([]domain.AdminCustomerMatch, error) {

@@ -31,6 +31,72 @@ func TestListCustomers_ProfessionalAllowed(t *testing.T) {
 	}
 }
 
+func TestListCustomers_NoParamsReturnsEverything(t *testing.T) {
+	store := newFakeStore()
+	store.customers["t1"] = map[string]domain.Customer{
+		"c1": {ID: "c1", Name: "Ana"}, "c2": {ID: "c2", Name: "Bruno"}, "c3": {ID: "c3", Name: "Carla"},
+	}
+	handler, tok, _ := newTestServer(store)
+	manager := domain.User{ID: "m1", TenantID: "t1", Role: domain.RoleManager}
+
+	rec := doRequest(t, handler, http.MethodGet, "/api/v1/customers", authHeader(t, tok, manager), nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got domain.CustomerPage
+	decodeBody(t, rec, &got)
+	if len(got.Items) != 3 || got.Total != 3 {
+		t.Fatalf("expected all 3 customers with total=3, got %+v", got)
+	}
+}
+
+func TestListCustomers_Paginated(t *testing.T) {
+	store := newFakeStore()
+	store.customers["t1"] = map[string]domain.Customer{
+		"c1": {ID: "c1", Name: "Ana"}, "c2": {ID: "c2", Name: "Bruno"}, "c3": {ID: "c3", Name: "Carla"},
+	}
+	handler, tok, _ := newTestServer(store)
+	manager := domain.User{ID: "m1", TenantID: "t1", Role: domain.RoleManager}
+
+	rec := doRequest(t, handler, http.MethodGet, "/api/v1/customers?page=1&limit=2", authHeader(t, tok, manager), nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got domain.CustomerPage
+	decodeBody(t, rec, &got)
+	if len(got.Items) != 2 || got.Total != 3 {
+		t.Fatalf("expected 2 items (page 1 of limit 2) with total=3, got %+v", got)
+	}
+	if got.Items[0].Name != "Ana" || got.Items[1].Name != "Bruno" {
+		t.Fatalf("expected alphabetical order Ana, Bruno on page 1, got %+v", got.Items)
+	}
+
+	rec2 := doRequest(t, handler, http.MethodGet, "/api/v1/customers?page=2&limit=2", authHeader(t, tok, manager), nil)
+	var got2 domain.CustomerPage
+	decodeBody(t, rec2, &got2)
+	if len(got2.Items) != 1 || got2.Items[0].Name != "Carla" {
+		t.Fatalf("expected page 2 to have just Carla, got %+v", got2.Items)
+	}
+}
+
+func TestListCustomers_InvalidPagination(t *testing.T) {
+	store := newFakeStore()
+	handler, tok, _ := newTestServer(store)
+	manager := domain.User{ID: "m1", TenantID: "t1", Role: domain.RoleManager}
+
+	cases := []string{"?limit=0", "?limit=101", "?limit=abc", "?limit=10&page=0", "?limit=10&page=abc"}
+	for _, qs := range cases {
+		t.Run(qs, func(t *testing.T) {
+			rec := doRequest(t, handler, http.MethodGet, "/api/v1/customers"+qs, authHeader(t, tok, manager), nil)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for query %q, got %d", qs, rec.Code)
+			}
+		})
+	}
+}
+
 func TestCreateCustomer_HappyPath(t *testing.T) {
 	store := newFakeStore()
 	handler, tok, _ := newTestServer(store)

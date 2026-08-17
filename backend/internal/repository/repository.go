@@ -25,8 +25,12 @@ func New(db *pgxpool.Pool) *Repository { return &Repository{db: db} }
 // lookups by those identifiers are not tenant-scoped; domain.User itself
 // carries TenantID for the rows that are looked up by id/identifier.
 
+// ListServices is capped at 1000 rows — services stay in the dozens per
+// barbershop in practice, and every consumer (booking dropdowns, agenda
+// filters) needs the complete set, so this is a safety net against an
+// unbounded query, not real pagination.
 func (r *Repository) ListServices(ctx context.Context, tenantID string) ([]domain.Service, error) {
-	rows, err := r.db.Query(ctx, `SELECT id, name, duration_minutes, price_cents, active, created_at FROM services WHERE tenant_id=$1 ORDER BY name`, tenantID)
+	rows, err := r.db.Query(ctx, `SELECT id, name, duration_minutes, price_cents, active, created_at FROM services WHERE tenant_id=$1 ORDER BY name LIMIT 1000`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -62,8 +66,10 @@ func (r *Repository) UpdateService(ctx context.Context, tenantID, id string, ite
 	return item, err
 }
 
+// ListProfessionals is capped at 1000 rows for the same reason as
+// ListServices above — a safety net, not real pagination.
 func (r *Repository) ListProfessionals(ctx context.Context, tenantID string) ([]domain.Professional, error) {
-	rows, err := r.db.Query(ctx, `SELECT id, name, phone, email, cpf, active, created_at FROM professionals WHERE tenant_id=$1 ORDER BY name`, tenantID)
+	rows, err := r.db.Query(ctx, `SELECT id, name, phone, email, cpf, active, created_at FROM professionals WHERE tenant_id=$1 ORDER BY name LIMIT 1000`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -292,21 +298,42 @@ func (r *Repository) SetProfessionalServices(ctx context.Context, tenantID, prof
 	return entries, nil
 }
 
-func (r *Repository) ListCustomers(ctx context.Context, tenantID string) ([]domain.Customer, error) {
-	rows, err := r.db.Query(ctx, `SELECT id, name, phone, email, active, created_at FROM customers WHERE tenant_id=$1 ORDER BY name`, tenantID)
+// ListCustomers is the one list endpoint with real pagination (unlike
+// ListServices/ListProfessionals above): a barbershop's clientele
+// realistically grows unbounded over time, unlike its curated services and
+// staff. limit<=0 means "no pagination" — every row, matching the endpoint's
+// original behavior, with Total just len(items) (no extra COUNT query).
+func (r *Repository) ListCustomers(ctx context.Context, tenantID string, page, limit int) (domain.CustomerPage, error) {
+	query := `SELECT id, name, phone, email, active, created_at FROM customers WHERE tenant_id=$1 ORDER BY name`
+	args := []any{tenantID}
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2)
+		args = append(args, limit, (page-1)*limit)
+	}
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return domain.CustomerPage{}, err
 	}
 	defer rows.Close()
 	items := []domain.Customer{}
 	for rows.Next() {
 		var item domain.Customer
 		if err := rows.Scan(&item.ID, &item.Name, &item.Phone, &item.Email, &item.Active, &item.CreatedAt); err != nil {
-			return nil, err
+			return domain.CustomerPage{}, err
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return domain.CustomerPage{}, err
+	}
+	if limit <= 0 {
+		return domain.CustomerPage{Items: items, Total: len(items)}, nil
+	}
+	var total int
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM customers WHERE tenant_id=$1`, tenantID).Scan(&total); err != nil {
+		return domain.CustomerPage{}, err
+	}
+	return domain.CustomerPage{Items: items, Total: total}, nil
 }
 
 func (r *Repository) CreateCustomer(ctx context.Context, tenantID string, item domain.Customer) (domain.Customer, error) {

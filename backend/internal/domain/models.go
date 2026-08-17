@@ -233,6 +233,14 @@ type Customer struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// CustomerPage is the paginated response for GET /customers: a page of
+// customers plus the total count (not just this page's length), so the UI
+// can render "página X de Y" without a second request.
+type CustomerPage struct {
+	Items []Customer `json:"items"`
+	Total int        `json:"total"`
+}
+
 // AdminCustomerMatch is one row of the superadmin's global customer search
 // (GET /admin/customers?q=): a customer plus which barbershop they belong
 // to, so a match can be found without impersonating tenant by tenant.

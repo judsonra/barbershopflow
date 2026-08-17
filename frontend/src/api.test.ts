@@ -72,4 +72,20 @@ describe('api client', () => {
     await expect(api.listImpersonationAudit()).resolves.toEqual(body)
     expect(fetch).toHaveBeenCalledWith('/api/v1/admin/audit', expect.any(Object))
   })
+
+  it('unwraps the customer list from the paginated envelope', async () => {
+    const customer = { id: '1', name: 'Maria', active: true }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [customer], total: 1 }), { status: 200 })))
+
+    await expect(api.customers()).resolves.toEqual([customer])
+    expect(fetch).toHaveBeenCalledWith('/api/v1/customers', expect.any(Object))
+  })
+
+  it('requests a specific customer page with page/limit in the query string', async () => {
+    const body = { items: [], total: 0 }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 })))
+
+    await expect(api.customersPage(2, 20)).resolves.toEqual(body)
+    expect(fetch).toHaveBeenCalledWith('/api/v1/customers?page=2&limit=20', expect.any(Object))
+  })
 })
