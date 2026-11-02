@@ -31,6 +31,9 @@ quick start), são sobre *como* trabalhar aqui.
 - Atualize `TODO.md` no mesmo commit quando a tarefa corresponde a uma
   linha dele — marque `[x]` e reescreva a linha resumindo o que foi
   construído de fato, não só "feito".
+- Antes de todo commit destinado à `main`, siga a skill
+  `manual-e-historico`: registre a mudança em `HISTORICO.md` e atualize o
+  manual do usuário quando ela afetar o usuário final.
 - `git push -u origin <branch>` e pare por aí. O usuário mescla pela
   própria UI do GitHub. Nunca abra ou mescle um PR sozinho sem pedido
   explícito.
