@@ -676,7 +676,7 @@ func (s *fakeStore) GetTenantByID(_ context.Context, id string) (domain.Tenant, 
 	return t, nil
 }
 
-func (s *fakeStore) UpdateTenant(_ context.Context, tenantID, name, slug string, selfSchedulingEnabled, autoConfirmAppointments bool, cancellationWindowHours int) (domain.Tenant, error) {
+func (s *fakeStore) UpdateTenant(_ context.Context, tenantID, name, slug string, selfSchedulingEnabled, autoConfirmAppointments bool, cancellationWindowHours int, timezone string) (domain.Tenant, error) {
 	if err := s.err("UpdateTenant"); err != nil {
 		return domain.Tenant{}, err
 	}
@@ -687,6 +687,9 @@ func (s *fakeStore) UpdateTenant(_ context.Context, tenantID, name, slug string,
 	t.Name, t.Slug = name, slug
 	t.SelfSchedulingEnabled, t.AutoConfirmAppointments = selfSchedulingEnabled, autoConfirmAppointments
 	t.CancellationWindowHours = cancellationWindowHours
+	if timezone != "" {
+		t.Timezone = timezone
+	}
 	s.tenants[tenantID] = t
 	return t, nil
 }

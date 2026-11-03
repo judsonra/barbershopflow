@@ -23,7 +23,7 @@ const client: User = { id: 'c1', name: 'Cliente', role: 'client', customer_id: '
 
 const tenant: Tenant = {
   id: 't1', name: 'Barbearia', slug: 'barbearia', self_scheduling_enabled: true,
-  auto_confirm_appointments: true, cancellation_window_hours: 0, active: true, created_at: new Date().toISOString(),
+  auto_confirm_appointments: true, cancellation_window_hours: 0, timezone: 'America/Sao_Paulo', active: true, created_at: new Date().toISOString(),
 }
 const service: Service = { id: 'svc-1', name: 'Corte', duration_minutes: 30, price_cents: 5000, active: true }
 const professional: Professional = { id: 'p1', name: 'Barbeiro', active: true }

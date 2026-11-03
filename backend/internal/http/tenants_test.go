@@ -151,6 +151,39 @@ func TestUpdateTenant_NegativeCancellationWindow(t *testing.T) {
 	}
 }
 
+func TestUpdateTenant_Timezone(t *testing.T) {
+	cases := []struct {
+		name         string
+		timezone     string
+		expectedCode int
+		expectedZone string
+	}{
+		{"valid zone is saved", "America/Manaus", http.StatusOK, "America/Manaus"},
+		{"omitted zone keeps the current one", "", http.StatusOK, "America/Sao_Paulo"},
+		{"unknown zone is rejected", "America/Atlantida", http.StatusBadRequest, "America/Sao_Paulo"},
+		{"server-local zone is rejected", "Local", http.StatusBadRequest, "America/Sao_Paulo"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeStore()
+			store.tenants["t1"] = domain.Tenant{ID: "t1", Name: "Antigo", Slug: "antigo", Timezone: "America/Sao_Paulo"}
+			handler, tok, _ := newTestServer(store)
+			manager := domain.User{ID: "m1", TenantID: "t1", Role: domain.RoleManager}
+
+			rec := doRequest(t, handler, http.MethodPatch, "/api/v1/tenant", authHeader(t, tok, manager), map[string]any{
+				"name": "Antigo", "slug": "antigo", "timezone": tc.timezone,
+			})
+
+			if rec.Code != tc.expectedCode {
+				t.Fatalf("expected %d, got %d: %s", tc.expectedCode, rec.Code, rec.Body.String())
+			}
+			if got := store.tenants["t1"].Timezone; got != tc.expectedZone {
+				t.Fatalf("expected timezone %q, got %q", tc.expectedZone, got)
+			}
+		})
+	}
+}
+
 func TestHolidaysCRUD(t *testing.T) {
 	store := newFakeStore()
 	handler, tok, _ := newTestServer(store)

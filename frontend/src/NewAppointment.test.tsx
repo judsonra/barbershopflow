@@ -28,7 +28,7 @@ describe('NewAppointment - staff booking', () => {
     }
     mockedApi.createAppointment.mockResolvedValue(created)
     const onDone = vi.fn().mockResolvedValue(undefined)
-    const tenant: Tenant = { id: 't1', name: 'B', slug: 'b', self_scheduling_enabled: false, auto_confirm_appointments: false, cancellation_window_hours: 0, active: true, created_at: '' }
+    const tenant: Tenant = { id: 't1', name: 'B', slug: 'b', self_scheduling_enabled: false, auto_confirm_appointments: false, cancellation_window_hours: 0, timezone: 'America/Sao_Paulo', active: true, created_at: '' }
     render(<NewAppointment user={manager} tenant={tenant} services={services} professionals={professionals} customers={customers} onDone={onDone} />)
 
     await userEvent.selectOptions(screen.getByLabelText('Cliente'), 'cust-1')
@@ -44,7 +44,7 @@ describe('NewAppointment - staff booking', () => {
 
 describe('NewAppointment - client self-scheduling', () => {
   it('shows pending messaging when auto-confirm is off', () => {
-    const tenant: Tenant = { id: 't1', name: 'B', slug: 'b', self_scheduling_enabled: true, auto_confirm_appointments: false, cancellation_window_hours: 0, active: true, created_at: '' }
+    const tenant: Tenant = { id: 't1', name: 'B', slug: 'b', self_scheduling_enabled: true, auto_confirm_appointments: false, cancellation_window_hours: 0, timezone: 'America/Sao_Paulo', active: true, created_at: '' }
     render(<NewAppointment user={client} tenant={tenant} services={services} professionals={professionals} customers={[]} onDone={vi.fn()} />)
 
     expect(screen.getByText(/precisa confirmar antes do horário ficar garantido/)).toBeInTheDocument()
@@ -52,7 +52,7 @@ describe('NewAppointment - client self-scheduling', () => {
   })
 
   it('shows immediate-confirmation messaging when auto-confirm is on', () => {
-    const tenant: Tenant = { id: 't1', name: 'B', slug: 'b', self_scheduling_enabled: true, auto_confirm_appointments: true, cancellation_window_hours: 0, active: true, created_at: '' }
+    const tenant: Tenant = { id: 't1', name: 'B', slug: 'b', self_scheduling_enabled: true, auto_confirm_appointments: true, cancellation_window_hours: 0, timezone: 'America/Sao_Paulo', active: true, created_at: '' }
     render(<NewAppointment user={client} tenant={tenant} services={services} professionals={professionals} customers={[]} onDone={vi.fn()} />)
 
     expect(screen.getByText(/reservado assim que você confirma/)).toBeInTheDocument()

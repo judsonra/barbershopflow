@@ -221,7 +221,7 @@ vínculo ativo.
 `GET /tenant` retorna as configurações da barbearia:
 
 ```json
-{ "id": "uuid", "name": "...", "slug": "...", "self_scheduling_enabled": false, "auto_confirm_appointments": false, "cancellation_window_hours": 0, "active": true }
+{ "id": "uuid", "name": "...", "slug": "...", "self_scheduling_enabled": false, "auto_confirm_appointments": false, "cancellation_window_hours": 0, "timezone": "America/Sao_Paulo", "active": true }
 ```
 
 `PATCH /services/{id}` (só `manager`) substitui o serviço inteiro — não há
@@ -245,10 +245,12 @@ de FK, agora em `appointments.customer_id`.
 outros PATCH: substitui `name`, `slug`, `self_scheduling_enabled`,
 `auto_confirm_appointments` e `cancellation_window_hours` de uma vez, sem
 merge parcial — a tela de configurações que só mexe num subconjunto
-desses campos reenvia os demais sem alteração.
+desses campos reenvia os demais sem alteração. A exceção é `timezone`, um nome
+de fuso IANA: se vier vazio ou ausente, o fuso atual é mantido; se for
+desconhecido, a resposta é `400 validation_error`.
 
 ```json
-{ "name": "Barbearia do Zé", "slug": "barbearia-do-ze", "self_scheduling_enabled": true, "auto_confirm_appointments": false, "cancellation_window_hours": 24 }
+{ "name": "Barbearia do Zé", "slug": "barbearia-do-ze", "self_scheduling_enabled": true, "auto_confirm_appointments": false, "cancellation_window_hours": 24, "timezone": "America/Manaus" }
 ```
 
 `name` não pode ser vazio e precisa ser único (case-insensitive, `409
@@ -309,8 +311,9 @@ presente):
 
 `weekday` segue a convenção do Go (`time.Weekday`): 0=domingo..6=sábado.
 `start_minute`/`end_minute` são minutos desde a meia-noite (540 = 09:00,
-1080 = 18:00), no fuso em que os agendamentos desse profissional são
-criados. Sem nenhuma entrada, o profissional não tem restrição de horário.
+1080 = 18:00), no fuso da barbearia (`timezone` de `GET /tenant`), qualquer que
+seja o deslocamento enviado em `starts_at`. Sem nenhuma entrada, o profissional
+não tem restrição de horário.
 
 `POST /professionals/{id}/time-off` cria um bloqueio pontual:
 
@@ -362,7 +365,8 @@ especialidades cadastradas para aquele profissional.
 ## Relatórios
 
 `GET /reports?from=&to=` (só `manager`; sem os parâmetros, padrão é o mês
-corrente):
+corrente no fuso da barbearia). `from` e `to` aceitam RFC 3339 ou `AAAA-MM-DD`,
+que significa meia-noite no fuso da barbearia:
 
 ```json
 {

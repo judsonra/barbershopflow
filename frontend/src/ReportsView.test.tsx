@@ -31,6 +31,7 @@ describe('ReportsView', () => {
     mockedApi.report.mockResolvedValue(report)
     render(<ReportsView onBack={vi.fn()} />)
     await waitFor(() => expect(mockedApi.report).toHaveBeenCalledTimes(1))
+    expect(mockedApi.report.mock.calls[0][0]).toMatch(/^\d{4}-\d{2}-01$/)
   })
 
   it('shows the error message when the report fails to load', async () => {

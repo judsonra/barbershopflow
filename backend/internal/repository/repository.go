@@ -461,6 +461,14 @@ func (r *Repository) ListAppointments(ctx context.Context, tenantID, customerID,
 // already applies for booking). Revenue and retention are single
 // aggregate queries.
 func (r *Repository) GetReport(ctx context.Context, tenantID string, from, to time.Time) (domain.Report, error) {
+	tenant, err := r.GetTenantByID(ctx, tenantID)
+	if err != nil {
+		return domain.Report{}, err
+	}
+	// Schedules are local wall-clock minutes, so days must be walked in the
+	// tenant's zone for the weekday and the time-off overlap to line up.
+	from, to = from.In(tenant.Location()), to.In(tenant.Location())
+
 	report := domain.Report{From: from, To: to}
 	report.Occupancy.ByProfessional = []domain.ProfessionalOccupancy{}
 	report.Revenue.ByProfessional = []domain.ProfessionalRevenue{}
@@ -648,13 +656,22 @@ func (r *Repository) CreateAppointment(ctx context.Context, tenantID, status str
 
 	item.EndsAt = item.StartsAt.Add(time.Duration(duration) * time.Minute)
 
+	// Working hours and holidays are local to the barbershop, while StartsAt
+	// usually arrives in UTC: compare them in the tenant's zone, never in
+	// whatever offset the client happened to send.
+	var timezone string
+	if err := tx.QueryRow(ctx, `SELECT timezone FROM tenants WHERE id=$1`, tenantID).Scan(&timezone); err != nil {
+		return item, err
+	}
+	localStart := item.StartsAt.In(domain.Tenant{Timezone: timezone}.Location())
+
 	var hasSchedule bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM professional_schedules WHERE professional_id=$1)`, item.ProfessionalID).Scan(&hasSchedule); err != nil {
 		return item, err
 	}
 	if hasSchedule {
-		weekday := int(item.StartsAt.Weekday())
-		startMinute := item.StartsAt.Hour()*60 + item.StartsAt.Minute()
+		weekday := int(localStart.Weekday())
+		startMinute := localStart.Hour()*60 + localStart.Minute()
 		endMinute := startMinute + duration
 		var windowStart, windowEnd int
 		err := tx.QueryRow(ctx, `SELECT start_minute, end_minute FROM professional_schedules WHERE professional_id=$1 AND weekday=$2`,
@@ -681,7 +698,7 @@ func (r *Repository) CreateAppointment(ctx context.Context, tenantID, status str
 		return item, domain.ErrTimeBlocked
 	}
 
-	holidayDate, err := time.Parse("2006-01-02", item.StartsAt.Format("2006-01-02"))
+	holidayDate, err := time.Parse("2006-01-02", localStart.Format("2006-01-02"))
 	if err != nil {
 		return item, err
 	}
@@ -973,10 +990,10 @@ func (r *Repository) CreateIdentityWithMembership(ctx context.Context, name, ema
 	return r.GetMembershipByID(ctx, membershipID)
 }
 
-const tenantColumns = `id, name, slug, self_scheduling_enabled, auto_confirm_appointments, cancellation_window_hours, active, created_at`
+const tenantColumns = `id, name, slug, self_scheduling_enabled, auto_confirm_appointments, cancellation_window_hours, timezone, active, created_at`
 
 func scanTenant(item *domain.Tenant) []any {
-	return []any{&item.ID, &item.Name, &item.Slug, &item.SelfSchedulingEnabled, &item.AutoConfirmAppointments, &item.CancellationWindowHours, &item.Active, &item.CreatedAt}
+	return []any{&item.ID, &item.Name, &item.Slug, &item.SelfSchedulingEnabled, &item.AutoConfirmAppointments, &item.CancellationWindowHours, &item.Timezone, &item.Active, &item.CreatedAt}
 }
 
 // ListTenants is superadmin-only: every other query in this file is
@@ -1040,12 +1057,14 @@ func (r *Repository) GetTenantByID(ctx context.Context, id string) (domain.Tenan
 // same contract as services/professionals/customers: name/slug, the
 // self-scheduling/auto-confirmation flags, and the cancellation window,
 // all in one call.
-func (r *Repository) UpdateTenant(ctx context.Context, tenantID, name, slug string, selfSchedulingEnabled, autoConfirmAppointments bool, cancellationWindowHours int) (domain.Tenant, error) {
+// UpdateTenant keeps the current timezone when timezone is empty, so an older
+// client that doesn't send the field can't reset a barbershop's zone.
+func (r *Repository) UpdateTenant(ctx context.Context, tenantID, name, slug string, selfSchedulingEnabled, autoConfirmAppointments bool, cancellationWindowHours int, timezone string) (domain.Tenant, error) {
 	var item domain.Tenant
 	err := r.db.QueryRow(ctx, `
-		UPDATE tenants SET name=$2, slug=$3, self_scheduling_enabled=$4, auto_confirm_appointments=$5, cancellation_window_hours=$6
+		UPDATE tenants SET name=$2, slug=$3, self_scheduling_enabled=$4, auto_confirm_appointments=$5, cancellation_window_hours=$6, timezone=COALESCE(NULLIF($7,''), timezone)
 		WHERE id=$1 RETURNING `+tenantColumns,
-		tenantID, name, slug, selfSchedulingEnabled, autoConfirmAppointments, cancellationWindowHours).Scan(scanTenant(&item)...)
+		tenantID, name, slug, selfSchedulingEnabled, autoConfirmAppointments, cancellationWindowHours, timezone).Scan(scanTenant(&item)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item, domain.ErrNotFound
 	}

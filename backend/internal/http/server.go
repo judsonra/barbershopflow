@@ -63,7 +63,7 @@ type Store interface {
 	ListTenants(ctx context.Context) ([]domain.Tenant, error)
 	GetFirstManagerByTenant(ctx context.Context, tenantID string) (domain.User, error)
 	GetTenantByID(ctx context.Context, id string) (domain.Tenant, error)
-	UpdateTenant(ctx context.Context, tenantID, name, slug string, selfSchedulingEnabled, autoConfirmAppointments bool, cancellationWindowHours int) (domain.Tenant, error)
+	UpdateTenant(ctx context.Context, tenantID, name, slug string, selfSchedulingEnabled, autoConfirmAppointments bool, cancellationWindowHours int, timezone string) (domain.Tenant, error)
 	ListHolidays(ctx context.Context, tenantID string) ([]domain.Holiday, error)
 	CreateHoliday(ctx context.Context, tenantID string, item domain.Holiday) (domain.Holiday, error)
 	DeleteHoliday(ctx context.Context, tenantID, id string) error
@@ -723,6 +723,7 @@ func (s *server) updateTenant(w http.ResponseWriter, r *http.Request) {
 		SelfSchedulingEnabled   bool   `json:"self_scheduling_enabled"`
 		AutoConfirmAppointments bool   `json:"auto_confirm_appointments"`
 		CancellationWindowHours int    `json:"cancellation_window_hours"`
+		Timezone                string `json:"timezone"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -741,8 +742,14 @@ func (s *server) updateTenant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation_error", "prazo de cancelamento não pode ser negativo")
 		return
 	}
+	if body.Timezone != "" {
+		if _, err := domain.ParseTimezone(body.Timezone); err != nil {
+			writeError(w, http.StatusBadRequest, "validation_error", "fuso horário inválido")
+			return
+		}
+	}
 	claims, _ := claimsFromContext(r)
-	tenant, err := s.store.UpdateTenant(r.Context(), claims.TenantID, body.Name, body.Slug, body.SelfSchedulingEnabled, body.AutoConfirmAppointments, body.CancellationWindowHours)
+	tenant, err := s.store.UpdateTenant(r.Context(), claims.TenantID, body.Name, body.Slug, body.SelfSchedulingEnabled, body.AutoConfirmAppointments, body.CancellationWindowHours, body.Timezone)
 	respond(w, tenant, err)
 }
 
@@ -1278,20 +1285,27 @@ func (s *server) listAppointments(w http.ResponseWriter, r *http.Request) {
 
 // getReport defaults to the current calendar month, unlike
 // listAppointments (which defaults to today) - a report is normally read
-// over a longer window than the daily agenda.
+// over a longer window than the daily agenda. Plain AAAA-MM-DD dates mean
+// midnight in the barbershop's zone, so a period matches its local calendar.
 func (s *server) getReport(w http.ResponseWriter, r *http.Request) {
-	now := time.Now()
-	from, err := parseTime(r.URL.Query().Get("from"), time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()))
+	claims, _ := claimsFromContext(r)
+	tenant, err := s.store.GetTenantByID(r.Context(), claims.TenantID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	location := tenant.Location()
+	now := time.Now().In(location)
+	from, err := parseDayOrTime(r.URL.Query().Get("from"), time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, location), location)
 	if err != nil {
 		writeError(w, 400, "validation_error", "from inválido")
 		return
 	}
-	to, err := parseTime(r.URL.Query().Get("to"), from.AddDate(0, 1, 0))
+	to, err := parseDayOrTime(r.URL.Query().Get("to"), from.AddDate(0, 1, 0), location)
 	if err != nil || !to.After(from) {
 		writeError(w, 400, "validation_error", "to inválido")
 		return
 	}
-	claims, _ := claimsFromContext(r)
 	report, err := s.store.GetReport(r.Context(), claims.TenantID, from, to)
 	respond(w, report, err)
 }
@@ -1383,6 +1397,13 @@ func parseTime(value string, fallback time.Time) (time.Time, error) {
 		return fallback, nil
 	}
 	return time.Parse(time.RFC3339, value)
+}
+
+func parseDayOrTime(value string, fallback time.Time, location *time.Location) (time.Time, error) {
+	if day, err := time.ParseInLocation("2006-01-02", value, location); err == nil {
+		return day, nil
+	}
+	return parseTime(value, fallback)
 }
 func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
