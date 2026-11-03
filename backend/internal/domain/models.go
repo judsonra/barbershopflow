@@ -346,7 +346,7 @@ type ProfessionalOccupancy struct {
 // an average of each professional's individual rate, so periods differ in
 // weight by how much capacity each professional actually has.
 type OccupancyReport struct {
-	OverallRate    float64                  `json:"overall_rate"`
+	OverallRate    float64                 `json:"overall_rate"`
 	ByProfessional []ProfessionalOccupancy `json:"by_professional"`
 }
 
@@ -359,7 +359,7 @@ type ProfessionalRevenue struct {
 // RevenueReport counts only StatusCompleted appointments - revenue that
 // was actually realized, not merely scheduled/confirmed.
 type RevenueReport struct {
-	TotalCents     int64                  `json:"total_cents"`
+	TotalCents     int64                 `json:"total_cents"`
 	ByProfessional []ProfessionalRevenue `json:"by_professional"`
 }
 
@@ -378,4 +378,11 @@ type Report struct {
 	Occupancy OccupancyReport `json:"occupancy"`
 	Revenue   RevenueReport   `json:"revenue"`
 	Retention RetentionReport `json:"retention"`
+}
+
+// ProfessionalCommission stores hundredths of a percent or cents, according to Type.
+type ProfessionalCommission struct {
+	ServiceID string `json:"service_id"`
+	Type      string `json:"type"`
+	Value     int64  `json:"value"`
 }

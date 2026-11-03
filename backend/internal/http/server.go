@@ -73,6 +73,9 @@ type Store interface {
 	ListTimeOff(ctx context.Context, tenantID, professionalID string, from, to time.Time) ([]domain.TimeOff, error)
 	CreateTimeOff(ctx context.Context, tenantID, professionalID string, item domain.TimeOff) (domain.TimeOff, error)
 	DeleteTimeOff(ctx context.Context, tenantID, professionalID, id string) error
+	ListProfessionalCommissions(ctx context.Context, tenantID, professionalID string) ([]domain.ProfessionalCommission, error)
+	SetProfessionalCommissions(ctx context.Context, tenantID, professionalID string, entries []domain.ProfessionalCommission) ([]domain.ProfessionalCommission, error)
+
 	ListProfessionalServices(ctx context.Context, tenantID, professionalID string) ([]domain.ProfessionalService, error)
 	SetProfessionalServices(ctx context.Context, tenantID, professionalID string, entries []domain.ProfessionalService) ([]domain.ProfessionalService, error)
 	CreateTenantWithManager(ctx context.Context, tenantName, slug, managerName, email, passwordHash string) (domain.Tenant, domain.User, error)
@@ -137,6 +140,9 @@ func New(store Store, cfg Config) http.Handler {
 	protected.HandleFunc("GET /api/v1/professionals/{id}/time-off", s.listTimeOff)
 	protected.HandleFunc("POST /api/v1/professionals/{id}/time-off", s.requireOwnerOrManager(s.createTimeOff))
 	protected.HandleFunc("DELETE /api/v1/professionals/{id}/time-off/{blockId}", s.requireOwnerOrManager(s.deleteTimeOff))
+	protected.HandleFunc("GET /api/v1/professionals/{id}/commissions", s.requireRole(domain.RoleManager, s.listProfessionalCommissions))
+	protected.HandleFunc("PUT /api/v1/professionals/{id}/commissions", s.requireRole(domain.RoleManager, s.setProfessionalCommissions))
+
 	protected.HandleFunc("GET /api/v1/professionals/{id}/services", s.listProfessionalServices)
 	protected.HandleFunc("PUT /api/v1/professionals/{id}/services", s.requireRole(domain.RoleManager, s.setProfessionalServices))
 	protected.HandleFunc("POST /api/v1/professionals/{id}/credentials", s.requireRole(domain.RoleManager, s.grantProfessionalAccess))
@@ -1531,4 +1537,39 @@ func recoverer(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *server) listProfessionalCommissions(w http.ResponseWriter, r *http.Request) {
+	claims, _ := claimsFromContext(r)
+	items, err := s.store.ListProfessionalCommissions(r.Context(), claims.TenantID, r.PathValue("id"))
+	respond(w, items, err)
+}
+
+func (s *server) setProfessionalCommissions(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Entries []domain.ProfessionalCommission `json:"entries"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	seen := map[string]bool{}
+	for _, entry := range body.Entries {
+		if entry.ServiceID == "" {
+			writeError(w, http.StatusBadRequest, "validation_error", "service_id é obrigatório")
+			return
+		}
+		if seen[entry.ServiceID] {
+			writeError(w, http.StatusBadRequest, "validation_error", "serviço repetido")
+			return
+		}
+		seen[entry.ServiceID] = true
+		if (entry.Type != "fixed" && entry.Type != "percentage") || entry.Value < 0 || (entry.Type == "percentage" && entry.Value > 10000) {
+			writeError(w, http.StatusBadRequest, "validation_error", "Comissão inválida: use valor positivo ou percentual entre 0 e 100")
+			return
+		}
+
+	}
+	claims, _ := claimsFromContext(r)
+	items, err := s.store.SetProfessionalCommissions(r.Context(), claims.TenantID, r.PathValue("id"), body.Entries)
+	respond(w, items, err)
 }

@@ -1,3 +1,4 @@
+import { CommissionsManager } from './CommissionsManager'
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { api, ApiError } from './api'
@@ -788,6 +789,7 @@ export function ProfessionalsManager({ professionals, services, onCreated, onUpd
   const [grantPhone, setGrantPhone] = useState('')
   const [grantMessage, setGrantMessage] = useState('')
   const [grantSaving, setGrantSaving] = useState(false)
+  const [commissionsOpen, setCommissionsOpen] = useState(false)
   const [specialtiesOpen, setSpecialtiesOpen] = useState(false)
   const [specialtiesLoading, setSpecialtiesLoading] = useState(false)
   const [specialtiesSaving, setSpecialtiesSaving] = useState(false)
@@ -947,8 +949,10 @@ export function ProfessionalsManager({ professionals, services, onCreated, onUpd
           {togglingId === detailProfessional.id ? 'Salvando…' : detailProfessional.active ? 'Excluir' : 'Reativar'}
         </button>
         <button type="button" onClick={() => startGrant(detailProfessional)}>Conceder acesso</button>
+        <button type="button" onClick={() => setCommissionsOpen(v => !v)}>Comissão</button>
         <button type="button" onClick={() => startSpecialties(detailProfessional)}>Especialidades e preços</button>
       </div>
+      {commissionsOpen && <CommissionsManager key={detailProfessional.id} id={detailProfessional.id} services={services} onClose={() => setCommissionsOpen(false)} />}
       {granting && <form onSubmit={submitGrant} className="quick">
         <p>Enviar senha de acesso ao app para <b>{detailProfessional.name}</b> por SMS/WhatsApp:</p>
         {grantMessage && <p>{grantMessage}</p>}
@@ -975,7 +979,7 @@ export function ProfessionalsManager({ professionals, services, onCreated, onUpd
         <button disabled={specialtiesSaving || specialtiesLoading}>{specialtiesSaving ? 'Salvando…' : 'Salvar especialidades'}</button>
         <button type="button" onClick={() => setSpecialtiesOpen(false)}>Fechar</button>
       </form>}
-      <button type="button" className="link-button" onClick={() => { setGranting(false); setSpecialtiesOpen(false); setScreen({ name: 'list' }) }}>Voltar</button>
+      <button type="button" className="link-button" onClick={() => { setGranting(false); setCommissionsOpen(false); setSpecialtiesOpen(false); setScreen({ name: 'list' }) }}>Voltar</button>
     </>}
 
     {screen.name === 'edit' && <form onSubmit={submitEdit} className="quick">

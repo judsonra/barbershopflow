@@ -34,3 +34,5 @@ export type Report = {
   revenue: { total_cents: number; by_professional: ProfessionalRevenue[] }
   retention: { total_customers: number; returning_customers: number; rate: number }
 }
+
+export type ProfessionalCommission = { service_id: string; type: 'percentage' | 'fixed'; value: number }

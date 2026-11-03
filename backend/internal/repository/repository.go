@@ -1236,3 +1236,59 @@ func isUniqueViolation(err error) (string, bool) {
 	}
 	return "", false
 }
+
+func (r *Repository) ListProfessionalCommissions(ctx context.Context, tenantID, professionalID string) ([]domain.ProfessionalCommission, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT service_id, type, value FROM professional_commissions
+		WHERE tenant_id=$1 AND professional_id=$2 ORDER BY service_id`, tenantID, professionalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.ProfessionalCommission{}
+	for rows.Next() {
+		var item domain.ProfessionalCommission
+		if err := rows.Scan(&item.ServiceID, &item.Type, &item.Value); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *Repository) SetProfessionalCommissions(ctx context.Context, tenantID, professionalID string, entries []domain.ProfessionalCommission) ([]domain.ProfessionalCommission, error) {
+	exists, err := r.professionalExists(ctx, tenantID, professionalID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, domain.ErrNotFound
+	}
+
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `DELETE FROM professional_commissions WHERE tenant_id=$1 AND professional_id=$2`, tenantID, professionalID); err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		var serviceExists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM services WHERE id=$1 AND tenant_id=$2)`, entry.ServiceID, tenantID).Scan(&serviceExists); err != nil {
+			return nil, err
+		}
+		if !serviceExists {
+			return nil, domain.ErrNotFound
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO professional_commissions(tenant_id, professional_id, service_id, type, value) VALUES($1,$2,$3,$4,$5)`,
+			tenantID, professionalID, entry.ServiceID, entry.Type, entry.Value); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}

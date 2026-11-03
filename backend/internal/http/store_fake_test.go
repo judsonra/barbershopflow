@@ -841,3 +841,10 @@ func (s *fakeStore) SetProfessionalServices(_ context.Context, tenantID, profess
 	s.profServices[scopeKey(tenantID, professionalID)] = entries
 	return entries, nil
 }
+
+func (s *fakeStore) ListProfessionalCommissions(_ context.Context, tenantID, professionalID string) ([]domain.ProfessionalCommission, error) {
+	return []domain.ProfessionalCommission{}, nil
+}
+func (s *fakeStore) SetProfessionalCommissions(_ context.Context, tenantID, professionalID string, entries []domain.ProfessionalCommission) ([]domain.ProfessionalCommission, error) {
+	return entries, nil
+}
