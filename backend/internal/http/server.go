@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,7 +25,7 @@ type Store interface {
 	ListProfessionals(ctx context.Context, tenantID string) ([]domain.Professional, error)
 	CreateProfessional(ctx context.Context, tenantID string, item domain.Professional) (domain.Professional, error)
 	UpdateProfessional(ctx context.Context, tenantID, id string, item domain.Professional) (domain.Professional, error)
-	ListCustomers(ctx context.Context, tenantID string) ([]domain.Customer, error)
+	ListCustomers(ctx context.Context, tenantID string, page, limit int) (domain.CustomerPage, error)
 	SearchCustomersGlobal(ctx context.Context, query string) ([]domain.AdminCustomerMatch, error)
 	RecordImpersonation(ctx context.Context, actorMembershipID, tenantID string) error
 	ListImpersonationAudit(ctx context.Context) ([]domain.ImpersonationAudit, error)
@@ -1218,10 +1219,39 @@ func (s *server) setProfessionalServices(w http.ResponseWriter, r *http.Request)
 	respond(w, items, err)
 }
 
+// parseCustomerPagination reads ?page=&limit= for GET /customers. limit
+// absent/empty means "no pagination" (page is ignored, limit=0 tells the
+// Store to skip LIMIT/OFFSET and return everything, matching this
+// endpoint's original behavior). limit present means real pagination: page
+// defaults to 1, 1<=limit<=100.
+func parseCustomerPagination(r *http.Request) (page, limit int, err error) {
+	limitStr := r.URL.Query().Get("limit")
+	if limitStr == "" {
+		return 1, 0, nil
+	}
+	limit, err = strconv.Atoi(limitStr)
+	if err != nil || limit < 1 || limit > 100 {
+		return 0, 0, fmt.Errorf("limit inválido")
+	}
+	page = 1
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		page, err = strconv.Atoi(pageStr)
+		if err != nil || page < 1 {
+			return 0, 0, fmt.Errorf("page inválido")
+		}
+	}
+	return page, limit, nil
+}
+
 func (s *server) listCustomers(w http.ResponseWriter, r *http.Request) {
+	page, limit, err := parseCustomerPagination(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "validation_error", err.Error())
+		return
+	}
 	claims, _ := claimsFromContext(r)
-	items, err := s.store.ListCustomers(r.Context(), claims.TenantID)
-	respond(w, items, err)
+	result, err := s.store.ListCustomers(r.Context(), claims.TenantID, page, limit)
+	respond(w, result, err)
 }
 func (s *server) createCustomer(w http.ResponseWriter, r *http.Request) {
 	var item domain.Customer

@@ -85,7 +85,7 @@ senha quando a identidade é realmente nova.
 | GET | `/professionals/{id}/services` | Especialidades do profissional (serviços habilitados + overrides) | qualquer papel |
 | PUT | `/professionals/{id}/services` | Substitui o conjunto de especialidades inteiro | `manager` |
 | POST | `/professionals/{id}/credentials` | Concede/renova acesso por celular a um profissional | `manager` |
-| GET | `/customers` | Lista clientes | `manager` ou `professional` |
+| GET | `/customers?page=&limit=` | Lista clientes, paginado (opcional) | `manager` ou `professional` |
 | POST | `/customers` | Cria cliente | `manager` ou `professional` |
 | PATCH | `/customers/{id}` | Atualiza dados/ativo do cliente (usado também para desativar/reativar) | `manager` ou `professional` |
 | POST | `/customers/{id}/credentials` | Concede/renova acesso por celular a um cliente | `manager` ou `professional` |
@@ -240,6 +240,16 @@ de FK, agora em `appointments.professional_id`.
 substitui o cliente inteiro (`name`, `phone`, `email`, `active`), sem merge
 parcial, e "Excluir" também é soft-delete via `active: false` — mesma razão
 de FK, agora em `appointments.customer_id`.
+
+`GET /customers` é o único endpoint de listagem com paginação de verdade
+(diferente de `/services` e `/professionals`, que devolvem tudo até um teto
+de 1000 linhas — clientela cresce sem limite ao longo do tempo, ao contrário
+do catálogo de serviços/equipe, que fica em dezenas). Sem `page`/`limit` na
+query, devolve todos os clientes da barbearia (comportamento original,
+`total` igual ao tamanho da lista). Com `limit` presente (`page` default 1,
+`1<=limit<=100`, senão `400 validation_error`), aplica `LIMIT`/`OFFSET` e
+devolve o total real via `COUNT(*)`. A resposta é sempre o mesmo formato,
+paginado ou não: `{"items": [...], "total": N}`.
 
 `PATCH /tenant` (só `manager`) segue o mesmo contrato de full-replace dos
 outros PATCH: substitui `name`, `slug`, `self_scheduling_enabled`,

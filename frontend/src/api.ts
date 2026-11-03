@@ -1,4 +1,4 @@
-import type { AdminCustomerMatch, Appointment, Customer, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
+import type { AdminCustomerMatch, Appointment, Customer, CustomerPage, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
 
 const ACCESS_KEY = 'bf_access_token'
 const REFRESH_KEY = 'bf_refresh_token'
@@ -171,7 +171,8 @@ export const api = {
   getProfessionalServices: (professionalId: string) => request<ProfessionalService[]>(`/professionals/${professionalId}/services`),
   setProfessionalServices: (professionalId: string, entries: ProfessionalService[]) =>
     request<ProfessionalService[]>(`/professionals/${professionalId}/services`, { method: 'PUT', body: JSON.stringify({ entries }) }),
-  customers: () => request<Customer[]>('/customers'),
+  customers: async () => (await request<CustomerPage>('/customers')).items,
+  customersPage: (page: number, limit: number) => request<CustomerPage>(`/customers?page=${page}&limit=${limit}`),
   createCustomer: (data: { name: string; phone?: string; email?: string }) =>
     request<Customer>('/customers', { method: 'POST', body: JSON.stringify(data) }),
   updateCustomer: (id: string, data: { name: string; phone?: string; email?: string; active: boolean }) =>
