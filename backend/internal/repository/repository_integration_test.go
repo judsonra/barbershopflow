@@ -29,15 +29,79 @@ func setupAppointmentFixtures(t *testing.T, repo *Repository, tenantID string) (
 	return service.ID, professional.ID, customer.ID
 }
 
-// nextMonday returns midnight UTC of the next Monday on/after a fixed,
-// far-future base date, so working-hours/holiday fixtures below have a
-// deterministic weekday to key off without depending on when the test runs.
+// nextMonday returns midnight, in the default tenant zone, of the next Monday
+// on/after a fixed, far-future base date, so working-hours/holiday fixtures
+// below have a deterministic weekday without depending on when the test runs.
 func nextMonday() time.Time {
-	day := time.Date(2031, time.March, 1, 0, 0, 0, 0, time.UTC)
+	day := time.Date(2031, time.March, 1, 0, 0, 0, 0, domain.Tenant{}.Location())
 	for day.Weekday() != time.Monday {
 		day = day.AddDate(0, 0, 1)
 	}
 	return day
+}
+
+// TestCreateAppointment_TenantTimezone_Integration sends every time in UTC,
+// as the frontend does, to pin that schedules and holidays are local.
+func TestCreateAppointment_TenantTimezone_Integration(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	monday := nextMonday()
+	utc := func(localHours int) time.Time { return monday.Add(time.Duration(localHours) * time.Hour).UTC() }
+
+	t.Run("schedule follows the barbershop's zone", func(t *testing.T) {
+		tenantID := newTestTenant(t, repo)
+		serviceID, professionalID, customerID := setupAppointmentFixtures(t, repo, tenantID)
+		if _, err := repo.SetProfessionalSchedule(ctx, tenantID, professionalID, []domain.ScheduleEntry{
+			{Weekday: int(time.Monday), StartMinute: 540, EndMinute: 1080}, // 09:00-18:00
+		}); err != nil {
+			t.Fatalf("SetProfessionalSchedule: %v", err)
+		}
+		book := func(startsAt time.Time) error {
+			_, err := repo.CreateAppointment(ctx, tenantID, domain.StatusScheduled, domain.Appointment{
+				CustomerID: customerID, ProfessionalID: professionalID, ServiceID: serviceID, StartsAt: startsAt,
+			})
+			return err
+		}
+
+		if err := book(utc(6)); !errors.Is(err, domain.ErrOutsideWorkingHours) {
+			t.Errorf("06:00 local was 09:00 UTC and got accepted before the fix: expected ErrOutsideWorkingHours, got %v", err)
+		}
+		if err := book(utc(16)); err != nil {
+			t.Errorf("16:00 local was 19:00 UTC and got refused before the fix: expected success, got %v", err)
+		}
+
+		tenant, err := repo.GetTenantByID(ctx, tenantID)
+		if err != nil {
+			t.Fatalf("GetTenantByID: %v", err)
+		}
+		if _, err := repo.UpdateTenant(ctx, tenantID, tenant.Name, tenant.Slug, false, false, 0, "America/Manaus"); err != nil {
+			t.Fatalf("UpdateTenant: %v", err)
+		}
+		// 17:30 in Sao Paulo is 16:30 in Manaus, inside the schedule; 09:30 in
+		// Sao Paulo is 08:30 in Manaus, before it opens.
+		if err := book(monday.Add(17*time.Hour + 30*time.Minute).UTC()); err != nil {
+			t.Errorf("expected success in the new zone, got %v", err)
+		}
+		if err := book(monday.Add(9*time.Hour + 30*time.Minute).UTC()); !errors.Is(err, domain.ErrOutsideWorkingHours) {
+			t.Errorf("09:30 in Sao Paulo is 08:30 in Manaus: expected ErrOutsideWorkingHours, got %v", err)
+		}
+	})
+
+	t.Run("night booking belongs to the local date", func(t *testing.T) {
+		tenantID := newTestTenant(t, repo)
+		serviceID, professionalID, customerID := setupAppointmentFixtures(t, repo, tenantID)
+		tuesday := monday.AddDate(0, 0, 1)
+		if _, err := repo.CreateHoliday(ctx, tenantID, domain.Holiday{Date: tuesday.Format("2006-01-02"), Name: "Feriado"}); err != nil {
+			t.Fatalf("CreateHoliday: %v", err)
+		}
+
+		_, err := repo.CreateAppointment(ctx, tenantID, domain.StatusScheduled, domain.Appointment{
+			CustomerID: customerID, ProfessionalID: professionalID, ServiceID: serviceID, StartsAt: utc(22),
+		})
+		if err != nil {
+			t.Errorf("22:00 on Monday is Tuesday in UTC but not a holiday locally: expected success, got %v", err)
+		}
+	})
 }
 
 func TestCreateAppointment_Integration(t *testing.T) {

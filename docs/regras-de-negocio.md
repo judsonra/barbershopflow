@@ -106,6 +106,10 @@ acesso a redes confiáveis.
    /tenant/holidays/{id}`) bloqueiam a data inteira para **todos** os
    profissionais da barbearia de uma vez — diferente do bloqueio pontual do
    item 3, que é por profissional. Só o gestor cadastra/remove feriados.
+7. Jornada, feriados e períodos de relatório seguem o fuso de cada barbearia
+   (`tenants.timezone`, padrão `America/Sao_Paulo`, só o gestor altera). O fuso
+   do aparelho nunca decide se um horário é válido. A tela ainda mostra e recebe
+   os horários no fuso do aparelho, sem mudar o instante gravado.
 
 ### Clientes
 

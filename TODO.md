@@ -76,7 +76,7 @@ Complementa os itens em aberto das seções anteriores, que continuam valendo e 
 
 ### Bloqueia produção
 
-- [ ] Corrigir fuso horário na agenda: o horário chega em UTC e é comparado direto com jornada e feriados em hora local (`repository.go:656-657` e `:684`). Com jornada de 09:00 às 18:00 em Brasília, 16:00 é recusado e 06:00 é aceito; à noite, vale o dia da semana e o feriado do dia seguinte. Conferir também a ocupação nos relatórios (`repository.go:497`)
+- [x] Fuso horário por barbearia: `tenants.timezone` (padrão `America/Sao_Paulo`, migração `020_tenant_timezone.sql`), configurável em Config → Barbearia. Jornada, feriados e períodos de relatório agora seguem esse fuso, não o UTC nem o fuso do aparelho
 - [ ] Não criar `admin@barberflow.local` e `gestor@barberflow.local` com senha `change-me` em produção: as migrações `002` e `009` rodam em qualquer ambiente, embora o README diga "apenas em dev/demo"
 - [ ] Criar troca de senha pelo próprio usuário: não existe rota para isso, e senhas padrão e temporárias só mudam por SQL ou recuperação por celular. Avaliar obrigar a troca no primeiro acesso
 - [ ] Impedir a API de subir em produção sem `JWT_SECRET` forte: hoje ela usa `dev-secret-change-me` sem avisar, o que permite forjar um token de superadmin
@@ -101,6 +101,7 @@ Complementa os itens em aberto das seções anteriores, que continuam valendo e 
 ### Produto
 
 - [ ] Permitir remarcar agendamento: a API só cria e muda o status, sem editar o horário
+- [ ] Mostrar e receber horários da agenda no fuso da barbearia: a tela ainda usa o fuso do aparelho, o que confunde quem acessa de outro fuso, embora a validação já siga a barbearia
 - [ ] Recuperar senha de quem usa e-mail sem depender de login social, que ainda não foi testado com credenciais reais
 - [ ] Escolher o provedor de e-mail e o executor de tarefas agendadas, necessários para os lembretes
 - [ ] Escolher o gateway de pagamento, necessário para sinal, caixa, comissões, cupons, fidelidade e planos
@@ -114,10 +115,12 @@ Complementa os itens em aberto das seções anteriores, que continuam valendo e 
 - [ ] Impedir que promover o único gestor a superadmin deixe a barbearia sem gestor, o que quebra o acesso por impersonate
 - [ ] Viabilizar E2E com login real de cliente e profissional, hoje dependente de senha enviada por celular ou de OAuth
 - [ ] Rodar os testes de integração com Postgres e os E2E: não fizeram parte do levantamento
+- [ ] Corrigir o E2E `smoke-cross-feature`, que falha depois das 22:00: ele agenda para daqui a duas horas, o horário cai no dia seguinte e não aparece na agenda de hoje
 
 ### Documentação
 
-- [ ] Criar o manual em Docusaurus e documentar as funcionalidades atuais: a skill `manual-e-historico` só documenta mudanças novas
+- [ ] Documentar as funcionalidades atuais no manual em `manual/`: o site já existe, mas só cobre o fuso horário, porque a skill `manual-e-historico` só documenta mudanças novas
+- [ ] Definir o endereço e a publicação do manual: `url` em `manual/docusaurus.config.ts` é provisório
 - [ ] Decidir se uma GitHub Action deve registrar todo merge em `HISTORICO.md`, já que a skill só age quando o Claude trabalha no projeto
 - [ ] Revisar a linha 18 deste arquivo ("até o login existir"), que está desatualizada
 - [ ] Revisar a linha de migrações versionadas da seção 4: o controle já existe em `database.go`, e falta só decidir sobre rollback
@@ -128,8 +131,7 @@ Complementa os itens em aberto das seções anteriores, que continuam valendo e 
 ### Ordem recomendada
 
 1. Mesclar as branches, começando por `chore/gitignore-lista-usuarios`.
-2. Corrigir o fuso horário.
-3. Fechar as falhas de segurança.
-4. Criar o CI.
-5. Implementar a remarcação.
-6. Preparar TLS, backup e deploy.
+2. Fechar as falhas de segurança.
+3. Criar o CI.
+4. Implementar a remarcação.
+5. Preparar TLS, backup e deploy.

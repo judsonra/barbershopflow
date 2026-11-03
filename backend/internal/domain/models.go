@@ -2,7 +2,9 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"time"
+	_ "time/tzdata" // embeds the IANA database so zones load in any container image
 )
 
 var (
@@ -26,8 +28,34 @@ type Tenant struct {
 	SelfSchedulingEnabled   bool      `json:"self_scheduling_enabled"`
 	AutoConfirmAppointments bool      `json:"auto_confirm_appointments"`
 	CancellationWindowHours int       `json:"cancellation_window_hours"`
+	Timezone                string    `json:"timezone"`
 	Active                  bool      `json:"active"`
 	CreatedAt               time.Time `json:"created_at"`
+}
+
+// DefaultTimezone matches the tenants.timezone column default.
+const DefaultTimezone = "America/Sao_Paulo"
+
+// ParseTimezone validates an IANA zone name. Unlike time.LoadLocation it
+// rejects "" and "Local", which would silently mean UTC and the server's zone.
+func ParseTimezone(name string) (*time.Location, error) {
+	if name == "" || name == "Local" {
+		return nil, fmt.Errorf("invalid timezone %q", name)
+	}
+	return time.LoadLocation(name)
+}
+
+// Location is the zone that working hours, holidays and report periods are
+// expressed in for this tenant, regardless of the offset a client sent.
+func (t Tenant) Location() *time.Location {
+	if location, err := ParseTimezone(t.Timezone); err == nil {
+		return location
+	}
+	location, err := ParseTimezone(DefaultTimezone)
+	if err != nil {
+		return time.UTC
+	}
+	return location
 }
 
 const (

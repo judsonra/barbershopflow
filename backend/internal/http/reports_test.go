@@ -1,8 +1,10 @@
 package http
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/example/barberflow/backend/internal/domain"
 )
@@ -19,8 +21,30 @@ func TestGetReport_RoleGuard(t *testing.T) {
 	}
 }
 
+func TestGetReport_DatesAreLocalToTheTenant(t *testing.T) {
+	store := newFakeStore()
+	store.tenants["t1"] = domain.Tenant{ID: "t1", Timezone: "America/Manaus"}
+	handler, tok, _ := newTestServer(store)
+	manager := domain.User{ID: "m1", TenantID: "t1", Role: domain.RoleManager}
+
+	rec := doRequest(t, handler, http.MethodGet, "/api/v1/reports?from=2026-11-01&to=2026-12-01", authHeader(t, tok, manager), nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var report domain.Report
+	if err := json.Unmarshal(rec.Body.Bytes(), &report); err != nil {
+		t.Fatalf("decode report: %v", err)
+	}
+	expected := time.Date(2026, time.November, 1, 4, 0, 0, 0, time.UTC) // midnight in Manaus (UTC-4)
+	if !report.From.Equal(expected) {
+		t.Fatalf("expected from %v, got %v", expected, report.From)
+	}
+}
+
 func TestGetReport_HappyPathDefaultsToCurrentMonth(t *testing.T) {
 	store := newFakeStore()
+	store.tenants["t1"] = domain.Tenant{ID: "t1"}
 	handler, tok, _ := newTestServer(store)
 	manager := domain.User{ID: "m1", TenantID: "t1", Role: domain.RoleManager}
 
@@ -33,6 +57,7 @@ func TestGetReport_HappyPathDefaultsToCurrentMonth(t *testing.T) {
 
 func TestGetReport_InvalidDateRange(t *testing.T) {
 	store := newFakeStore()
+	store.tenants["t1"] = domain.Tenant{ID: "t1"}
 	handler, tok, _ := newTestServer(store)
 	manager := domain.User{ID: "m1", TenantID: "t1", Role: domain.RoleManager}
 
@@ -45,6 +70,7 @@ func TestGetReport_InvalidDateRange(t *testing.T) {
 
 func TestGetReport_StoreErrorMapping(t *testing.T) {
 	store := newFakeStore()
+	store.tenants["t1"] = domain.Tenant{ID: "t1"}
 	store.errs["GetReport"] = errUnmapped
 	handler, tok, _ := newTestServer(store)
 	manager := domain.User{ID: "m1", TenantID: "t1", Role: domain.RoleManager}

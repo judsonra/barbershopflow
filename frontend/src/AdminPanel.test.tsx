@@ -14,7 +14,7 @@ const mockedApi = vi.mocked(api, true)
 beforeEach(() => { vi.clearAllMocks() })
 
 const super_: User = { id: 's1', name: 'Super', role: 'superadmin', active: true }
-const tenant: Tenant = { id: 't1', name: 'Barbearia', slug: 'barbearia', self_scheduling_enabled: false, auto_confirm_appointments: false, cancellation_window_hours: 0, active: true, created_at: '' }
+const tenant: Tenant = { id: 't1', name: 'Barbearia', slug: 'barbearia', self_scheduling_enabled: false, auto_confirm_appointments: false, cancellation_window_hours: 0, timezone: 'America/Sao_Paulo', active: true, created_at: '' }
 
 describe('AdminPanel', () => {
   it('lists tenants and impersonates one', async () => {

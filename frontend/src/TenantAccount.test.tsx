@@ -13,7 +13,7 @@ beforeEach(() => { vi.clearAllMocks() })
 
 const tenant: Tenant = {
   id: 't1', name: 'Barbearia Original', slug: 'barbearia-original', self_scheduling_enabled: false,
-  auto_confirm_appointments: false, cancellation_window_hours: 0, active: true, created_at: new Date().toISOString(),
+  auto_confirm_appointments: false, cancellation_window_hours: 0, timezone: 'America/Sao_Paulo', active: true, created_at: new Date().toISOString(),
 }
 
 describe('TenantAccount', () => {
@@ -29,6 +29,22 @@ describe('TenantAccount', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Salvar' }))
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(updated))
+  })
+
+  it('saves the selected timezone', async () => {
+    mockedApi.updateTenant.mockResolvedValue({ ...tenant, timezone: 'America/Manaus' })
+    render(<TenantAccount tenant={tenant} onSaved={vi.fn()} onBack={vi.fn()} />)
+
+    expect(screen.getByLabelText(/Fuso horário/)).toHaveValue('America/Sao_Paulo')
+    await userEvent.selectOptions(screen.getByLabelText(/Fuso horário/), 'America/Manaus')
+    await userEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+
+    await waitFor(() => expect(mockedApi.updateTenant).toHaveBeenCalledWith(expect.objectContaining({ timezone: 'America/Manaus' })))
+  })
+
+  it('keeps a timezone set outside the Brazilian list', () => {
+    render(<TenantAccount tenant={{ ...tenant, timezone: 'Europe/Lisbon' }} onSaved={vi.fn()} onBack={vi.fn()} />)
+    expect(screen.getByLabelText(/Fuso horário/)).toHaveValue('Europe/Lisbon')
   })
 
   it('does not check availability when the name is unchanged', async () => {

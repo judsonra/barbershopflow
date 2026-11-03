@@ -519,7 +519,7 @@ export function TenantConfig({ tenant, onSaved, onBack }: { tenant: Tenant; onSa
     try {
       onSaved(await api.updateTenant({
         name: tenant.name, slug: tenant.slug, self_scheduling_enabled: selfScheduling,
-        auto_confirm_appointments: autoConfirm, cancellation_window_hours: cancellationWindowHours
+        auto_confirm_appointments: autoConfirm, cancellation_window_hours: cancellationWindowHours, timezone: tenant.timezone
       }))
     }
     catch (err) { setError(errorMessage(err)) }
@@ -582,9 +582,17 @@ export function TenantConfig({ tenant, onSaved, onBack }: { tenant: Tenant; onSa
 // barbershop signup form, but skips it while the typed name still matches
 // the tenant's own current name — otherwise submitting unchanged would
 // falsely show "já em uso" against itself.
+const brazilTimezones = [
+  { value: 'America/Noronha', label: 'Fernando de Noronha (UTC−2)' },
+  { value: 'America/Sao_Paulo', label: 'Brasília (UTC−3)' },
+  { value: 'America/Manaus', label: 'Manaus e Cuiabá (UTC−4)' },
+  { value: 'America/Rio_Branco', label: 'Rio Branco (UTC−5)' }
+]
+
 export function TenantAccount({ tenant, onSaved, onBack }: { tenant: Tenant; onSaved: (tenant: Tenant) => void; onBack: () => void }) {
   const [name, setName] = useState(tenant.name)
   const [slug, setSlug] = useState(tenant.slug)
+  const [timezone, setTimezone] = useState(tenant.timezone)
   const [nameStatus, setNameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -609,7 +617,7 @@ export function TenantAccount({ tenant, onSaved, onBack }: { tenant: Tenant; onS
       const updated = await api.updateTenant({
         name: name.trim(), slug: slug.trim().toLowerCase(),
         self_scheduling_enabled: tenant.self_scheduling_enabled, auto_confirm_appointments: tenant.auto_confirm_appointments,
-        cancellation_window_hours: tenant.cancellation_window_hours
+        cancellation_window_hours: tenant.cancellation_window_hours, timezone
       })
       onSaved(updated)
       setInfo('Dados salvos.')
@@ -631,6 +639,13 @@ export function TenantAccount({ tenant, onSaved, onBack }: { tenant: Tenant; onS
         {nameStatus === 'taken' && <small className="field-error">Nome já em uso</small>}
       </label>
       <label>Slug (usado em links de cadastro)<input required value={slug} onChange={e => setSlug(e.target.value.toLowerCase())} /></label>
+      <label>Fuso horário
+        <select value={timezone} onChange={e => setTimezone(e.target.value)}>
+          {!brazilTimezones.some(zone => zone.value === tenant.timezone) && <option value={tenant.timezone}>{tenant.timezone}</option>}
+          {brazilTimezones.map(zone => <option value={zone.value} key={zone.value}>{zone.label}</option>)}
+        </select>
+        <small>Vale para a jornada dos profissionais, os feriados e os relatórios.</small>
+      </label>
       <button className="primary" disabled={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
     </form>
     <div className="profile-info">
@@ -1125,7 +1140,7 @@ export function ReportsView({ onBack }: { onBack: () => void }) {
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
-    try { setReport(await api.report(new Date(from).toISOString(), new Date(to).toISOString())) }
+    try { setReport(await api.report(from, to)) }
     catch (err) { setError(errorMessage(err)) }
     finally { setLoading(false) }
   }, [from, to])

@@ -23,7 +23,7 @@ beforeEach(() => {
 
 const tenant: Tenant = {
   id: 't1', name: 'Barbearia', slug: 'barbearia', self_scheduling_enabled: false,
-  auto_confirm_appointments: false, cancellation_window_hours: 0, active: true, created_at: new Date().toISOString(),
+  auto_confirm_appointments: false, cancellation_window_hours: 0, timezone: 'America/Sao_Paulo', active: true, created_at: new Date().toISOString(),
 }
 
 describe('TenantConfig', () => {
