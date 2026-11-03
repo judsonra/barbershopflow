@@ -8,3 +8,4 @@ Formato: `data e hora | tipo | o que foi feito | rastreio`. O rastreio fica
 `.claude/skills/manual-e-historico/SKILL.md`.
 
 - 2026-11-02 17:18 -03 | chore | Cria a skill do manual do usuário e do diário de bordo, e inicia este histórico | pendente (branch docs/skill-manual-historico)
+- 2026-11-02 17:22 -03 | docs | Registra no TODO.md as pendências encontradas no levantamento do projeto | pendente (branch docs/todo-pendencias)

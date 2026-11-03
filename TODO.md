@@ -69,3 +69,67 @@ atual (backend Go, frontend React/PWA, infra Docker).
 - [ ] Background sync para ações offline (hoje `/api` é `NetworkOnly`, sem fila offline)
 - [ ] Avaliar wrapper nativo (Capacitor) se for necessário publicar nas lojas (Play Store/App Store)
 - [ ] Ícones/assets completos para todas as plataformas (hoje só `icon.svg`)
+
+## 6. Pendências do levantamento de 2026-11-02
+
+Complementa os itens em aberto das seções anteriores, que continuam valendo e não foram repetidos aqui. Os problemas abaixo vêm da leitura do código e ainda não foram reproduzidos com o app rodando.
+
+### Bloqueia produção
+
+- [ ] Corrigir fuso horário na agenda: o horário chega em UTC e é comparado direto com jornada e feriados em hora local (`repository.go:656-657` e `:684`). Com jornada de 09:00 às 18:00 em Brasília, 16:00 é recusado e 06:00 é aceito; à noite, vale o dia da semana e o feriado do dia seguinte. Conferir também a ocupação nos relatórios (`repository.go:497`)
+- [ ] Não criar `admin@barberflow.local` e `gestor@barberflow.local` com senha `change-me` em produção: as migrações `002` e `009` rodam em qualquer ambiente, embora o README diga "apenas em dev/demo"
+- [ ] Criar troca de senha pelo próprio usuário: não existe rota para isso, e senhas padrão e temporárias só mudam por SQL ou recuperação por celular. Avaliar obrigar a troca no primeiro acesso
+- [ ] Impedir a API de subir em produção sem `JWT_SECRET` forte: hoje ela usa `dev-secret-change-me` sem avisar, o que permite forjar um token de superadmin
+- [ ] Limitar `POST /auth/recover`: é público e troca a senha na hora só com o número do celular, o que permite derrubar o acesso de outra pessoa e gerar custo de SMS. Se o envio falhar, o usuário fica sem a senha nova
+- [ ] Limitar tentativas no login por e-mail (gestor e superadmin estão expostos a força bruta) e no cadastro público de barbearias (`POST /tenants`)
+- [ ] Impedir senha em texto puro no log em produção: sem token da Zenvia, a senha temporária vai para o log (`notify.go:46`) e a API não bloqueia esse modo
+- [ ] Permitir revogar sessões: o refresh token continua válido por até 7 dias, mesmo depois de trocar a senha
+- [ ] Configurar TLS e cabeçalhos de segurança no Nginx (`deploy/nginx.conf`)
+- [ ] Criar rotina de backup do banco e testar a restauração
+- [ ] Criar pipeline de deploy
+
+### Pendências imediatas
+
+- [ ] Mesclar as branches pendentes:
+  - `chore/gitignore-lista-usuarios`
+  - `mostrar-senha`
+  - `feature/paginacao-clientes` e `feature/e2e-paginacao-clientes` (a segunda depende da primeira e já a inclui)
+  - `docs/skill-manual-historico` e `docs/todo-pendencias` (a segunda depende da primeira e já a inclui)
+- [ ] Proteger `lista-usuarios.csv`: tem coluna `senha` e não está ignorado na `main`; um `git add .` pode publicá-lo
+- [ ] Apagar as 20 branches remotas já mescladas na `main`
+
+### Produto
+
+- [ ] Permitir remarcar agendamento: a API só cria e muda o status, sem editar o horário
+- [ ] Recuperar senha de quem usa e-mail sem depender de login social, que ainda não foi testado com credenciais reais
+- [ ] Escolher o provedor de e-mail e o executor de tarefas agendadas, necessários para os lembretes
+- [ ] Escolher o gateway de pagamento, necessário para sinal, caixa, comissões, cupons, fidelidade e planos
+- [ ] Definir o escopo da LGPD
+
+### Técnico
+
+- [ ] Configurar lint no frontend (ESLint/Prettier) e no backend, para o CI usar
+- [ ] Dividir `frontend/src/App.tsx` (cerca de 1.300 linhas) e `backend/internal/http/server.go` (cerca de 1.500 linhas)
+- [ ] Adicionar `ErrorBoundary` no frontend
+- [ ] Impedir que promover o único gestor a superadmin deixe a barbearia sem gestor, o que quebra o acesso por impersonate
+- [ ] Viabilizar E2E com login real de cliente e profissional, hoje dependente de senha enviada por celular ou de OAuth
+- [ ] Rodar os testes de integração com Postgres e os E2E: não fizeram parte do levantamento
+
+### Documentação
+
+- [ ] Criar o manual em Docusaurus e documentar as funcionalidades atuais: a skill `manual-e-historico` só documenta mudanças novas
+- [ ] Decidir se uma GitHub Action deve registrar todo merge em `HISTORICO.md`, já que a skill só age quando o Claude trabalha no projeto
+- [ ] Revisar a linha 18 deste arquivo ("até o login existir"), que está desatualizada
+- [ ] Revisar a linha de migrações versionadas da seção 4: o controle já existe em `database.go`, e falta só decidir sobre rollback
+- [ ] Corrigir `docs/regras-de-negocio.md:40`, que aponta para este arquivo sobre revogação de refresh tokens: o item só passou a existir nesta seção
+- [ ] Corrigir o README, que diz que os usuários de seed são "apenas em dev/demo"
+- [ ] Revisar a skill `workflow`, que fixa o modelo `Claude Sonnet 5` no rodapé dos commits
+
+### Ordem recomendada
+
+1. Mesclar as branches, começando por `chore/gitignore-lista-usuarios`.
+2. Corrigir o fuso horário.
+3. Fechar as falhas de segurança.
+4. Criar o CI.
+5. Implementar a remarcação.
+6. Preparar TLS, backup e deploy.
