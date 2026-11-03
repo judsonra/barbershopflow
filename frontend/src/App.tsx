@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
 import { api, ApiError } from './api'
 import { downloadICS, googleCalendarUrl } from './calendar'
 import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
@@ -180,6 +181,7 @@ export function Login({ onLogin, initialError, initialChoice }: {
   const [signup, setSignup] = useState({ tenantName: '', managerName: '', email: '', password: '' })
   const [nameStatus, setNameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle')
   const [choice, setChoice] = useState(initialChoice ?? null)
+  const [showPassword, setShowPassword] = useState(false)
 
   useEffect(() => {
     const name = signup.tenantName.trim()
@@ -270,7 +272,14 @@ export function Login({ onLogin, initialError, initialChoice }: {
         {mode === 'email' && <>
           <form onSubmit={submitEmail}>
             <label>E-mail<input type="email" required autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} /></label>
-            <label>Senha<input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label>
+            <label>Senha
+              <span className="field-status">
+                <input type={showPassword ? 'text' : 'password'} required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} />
+                <button type="button" className="field-icon" onClick={() => setShowPassword(v => !v)} aria-label={showPassword ? 'Ocultar caracteres' : 'Mostrar caracteres'}>
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </span>
+            </label>
             <button className="primary" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
           </form>
           <div className="social-login">
@@ -293,7 +302,14 @@ export function Login({ onLogin, initialError, initialChoice }: {
             </label>
             <label>Seu nome<input required value={signup.managerName} onChange={e => setSignup({ ...signup, managerName: e.target.value })} /></label>
             <label>E-mail<input type="email" required autoComplete="username" value={signup.email} onChange={e => setSignup({ ...signup, email: e.target.value })} /></label>
-            <label>Senha<input type="password" required minLength={8} autoComplete="new-password" value={signup.password} onChange={e => setSignup({ ...signup, password: e.target.value })} /></label>
+            <label>Senha
+              <span className="field-status">
+                <input type={showPassword ? 'text' : 'password'} required minLength={8} autoComplete="new-password" value={signup.password} onChange={e => setSignup({ ...signup, password: e.target.value })} />
+                <button type="button" className="field-icon" onClick={() => setShowPassword(v => !v)} aria-label={showPassword ? 'Ocultar caracteres' : 'Mostrar caracteres'}>
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </span>
+            </label>
             <button className="primary" disabled={loading}>{loading ? 'Criando…' : 'Criar barbearia'}</button>
           </form>
           <button type="button" className="link-button" onClick={() => { setMode('email'); setError('') }}>Já tenho conta</button>
@@ -302,7 +318,14 @@ export function Login({ onLogin, initialError, initialChoice }: {
         {mode === 'phone' && <>
           <form onSubmit={submitPhone}>
             <label>Celular<input type="tel" required autoComplete="tel" placeholder="(11) 99999-0000" value={phone} onChange={e => setPhone(maskPhone(e.target.value))} maxLength={16} /></label>
-            <label>Senha<input type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label>
+            <label>Senha
+              <span className="field-status">
+                <input type={showPassword ? 'text' : 'password'} required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} />
+                <button type="button" className="field-icon" onClick={() => setShowPassword(v => !v)} aria-label={showPassword ? 'Ocultar caracteres' : 'Mostrar caracteres'}>
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </span>
+            </label>
             <button className="primary" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
           </form>
           <button type="button" className="link-button" onClick={() => { setMode('recover'); setError('') }}>Esqueci minha senha</button>
