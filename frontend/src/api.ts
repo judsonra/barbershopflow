@@ -1,4 +1,4 @@
-import type { AdminCustomerMatch, PublicTenant, Appointment, Customer, CustomerPage, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
+import type { AccessChannel, AccessGrant, AdminCustomerMatch, PublicTenant, Appointment, Customer, CustomerPage, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
 
 const ACCESS_KEY = 'bf_access_token'
 const REFRESH_KEY = 'bf_refresh_token'
@@ -140,8 +140,12 @@ export const api = {
     request<{ message: string }>('/auth/recover', { method: 'POST', body: JSON.stringify({ phone, channel }) }),
   grantCustomerAccess: (customerId: string, phone: string, channel: 'sms' | 'whatsapp' = 'whatsapp') =>
     request<{ message: string }>(`/customers/${customerId}/credentials`, { method: 'POST', body: JSON.stringify({ phone, channel }) }),
-  grantProfessionalAccess: (professionalId: string, phone: string, channel: 'sms' | 'whatsapp' = 'whatsapp') =>
-    request<{ message: string }>(`/professionals/${professionalId}/credentials`, { method: 'POST', body: JSON.stringify({ phone, channel }) }),
+  // 'manual' sends nothing: the temporary password comes back for the
+  // manager to hand over in person, with the login and the page to use.
+  grantProfessionalAccess: (professionalId: string, data: { channel: AccessChannel; phone?: string; email?: string }) =>
+    request<AccessGrant>(`/professionals/${professionalId}/credentials`, { method: 'POST', body: JSON.stringify(data) }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ message: string }>('/auth/password', { method: 'POST', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
   logout: () => clearTokens(),
   me: () => request<User>('/auth/me'),
   tenant: () => request<Tenant>('/tenant'),

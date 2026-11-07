@@ -50,11 +50,15 @@ func main() {
 	)
 	oauthRedirectBase := env("OAUTH_REDIRECT_BASE_URL", "http://localhost:8080")
 	handler := apihttp.New(repository.New(pool), apihttp.Config{
-		Origins:     os.Getenv("CORS_ORIGINS"),
-		Tokenizer:   tokenizer,
-		Google:      auth.NewGoogleProvider(os.Getenv("GOOGLE_CLIENT_ID"), os.Getenv("GOOGLE_CLIENT_SECRET"), oauthRedirectBase+"/api/v1/auth/google/callback"),
-		Facebook:    auth.NewFacebookProvider(os.Getenv("FACEBOOK_CLIENT_ID"), os.Getenv("FACEBOOK_CLIENT_SECRET"), oauthRedirectBase+"/api/v1/auth/facebook/callback"),
-		Notifier:    notify.New(os.Getenv("ZENVIA_API_TOKEN"), env("ZENVIA_FROM_SMS", "BarberFlow"), env("ZENVIA_FROM_WHATSAPP", "BarberFlow")),
+		Origins:   os.Getenv("CORS_ORIGINS"),
+		Tokenizer: tokenizer,
+		Google:    auth.NewGoogleProvider(os.Getenv("GOOGLE_CLIENT_ID"), os.Getenv("GOOGLE_CLIENT_SECRET"), oauthRedirectBase+"/api/v1/auth/google/callback"),
+		Facebook:  auth.NewFacebookProvider(os.Getenv("FACEBOOK_CLIENT_ID"), os.Getenv("FACEBOOK_CLIENT_SECRET"), oauthRedirectBase+"/api/v1/auth/facebook/callback"),
+		Notifier:  notify.New(os.Getenv("ZENVIA_API_TOKEN"), env("ZENVIA_FROM_SMS", "BarberFlow"), env("ZENVIA_FROM_WHATSAPP", "BarberFlow")),
+		Mailer: notify.NewMailer(notify.SMTPConfig{
+			Host: os.Getenv("SMTP_HOST"), Port: env("SMTP_PORT", "587"),
+			Username: os.Getenv("SMTP_USERNAME"), Password: os.Getenv("SMTP_PASSWORD"), From: os.Getenv("SMTP_FROM"),
+		}),
 		FrontendURL: env("FRONTEND_URL", "http://localhost:5173"),
 	})
 	server := &http.Server{

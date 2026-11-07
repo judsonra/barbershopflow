@@ -4,6 +4,7 @@ import { api, ApiError } from './api'
 import { downloadICS, googleCalendarUrl } from './calendar'
 import { applyTheme, forgetSessionTheme, rememberSessionTheme, rememberSlugTheme, tenantSlugFromPath } from './branding'
 import { BrandingConfig } from './BrandingConfig'
+import { ProfessionalAccess } from './ProfessionalAccess'
 import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
 import type { PublicTenant, AdminCustomerMatch, Appointment, Customer, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, Service, Tenant, TimeOff, User } from './types'
 
@@ -203,9 +204,50 @@ export function Profile({ user, onLogout, onBack }: { user: User; onLogout: () =
       {user.phone && <div><small>Celular</small><b>{user.phone}</b></div>}
       <div><small>Status</small><b>{user.active ? 'Ativo' : 'Inativo'}</b></div>
     </div>
+    <ChangePassword />
     <button className="primary danger" onClick={onLogout}>Sair</button>
     <button type="button" className="link-button" onClick={onBack}>Voltar</button>
   </section>
+}
+
+// Anyone logged in can replace their password here — typically the 6-digit
+// temporary one the manager handed over. It changes in every barbershop the
+// person uses, since the password belongs to the identity.
+export function ChangePassword() {
+  const [open, setOpen] = useState(false)
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [info, setInfo] = useState('')
+
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setError(''); setInfo('')
+    if (next.length < 8) { setError('A nova senha deve ter pelo menos 8 caracteres.'); return }
+    if (next !== confirm) { setError('A confirmação não confere com a nova senha.'); return }
+    setSaving(true)
+    try {
+      setInfo((await api.changePassword(current, next)).message)
+      setCurrent(''); setNext(''); setConfirm(''); setOpen(false)
+    }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setSaving(false) }
+  }
+
+  return <div className="change-password">
+    {info && <p role="status">{info}</p>}
+    {!open ? <button type="button" className="link-button" onClick={() => { setOpen(true); setInfo('') }}>Alterar senha</button>
+      : <form onSubmit={submit} className="quick">
+          <h3>Alterar senha</h3>
+          {error && <div className="alert" role="alert">{error}</div>}
+          <label>Senha atual<input type="password" required autoComplete="current-password" value={current} onChange={e => setCurrent(e.target.value)} /></label>
+          <label>Nova senha<input type="password" required minLength={8} autoComplete="new-password" value={next} onChange={e => setNext(e.target.value)} /></label>
+          <label>Confirme a nova senha<input type="password" required autoComplete="new-password" value={confirm} onChange={e => setConfirm(e.target.value)} /></label>
+          <button className="primary" disabled={saving}>{saving ? 'Salvando…' : 'Salvar nova senha'}</button>
+          <button type="button" onClick={() => { setOpen(false); setError('') }}>Cancelar</button>
+        </form>}
+  </div>
 }
 
 type LoginMode = 'email' | 'phone' | 'recover' | 'signup' | 'choose-tenant'
@@ -349,7 +391,7 @@ export function Login({ onLogin, initialError, initialChoice, branding }: {
             <a className="social-button" href={api.socialLoginUrl('google', branding?.slug)}>Entrar com Google</a>
             <a className="social-button" href={api.socialLoginUrl('facebook', branding?.slug)}>Entrar com Facebook</a>
           </div>
-          <button type="button" className="link-button" onClick={() => { setMode('phone'); setError('') }}>Sou cliente e entro com celular</button>
+          <button type="button" className="link-button" onClick={() => { setMode('phone'); setError('') }}>Entrar com celular (clientes e profissionais)</button>
           {!branding && <button type="button" className="link-button" onClick={() => { setMode('signup'); setError('') }}>Cadastrar minha barbearia</button>}
         </>}
 
@@ -392,7 +434,7 @@ export function Login({ onLogin, initialError, initialChoice, branding }: {
             <button className="primary" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
           </form>
           <button type="button" className="link-button" onClick={() => { setMode('recover'); setError('') }}>Esqueci minha senha</button>
-          <button type="button" className="link-button" onClick={() => { setMode('email'); setError('') }}>{branding ? 'Sou da equipe e entro com e-mail' : 'Entrar com e-mail'}</button>
+          <button type="button" className="link-button" onClick={() => { setMode('email'); setError('') }}>Entrar com e-mail</button>
         </>}
 
         {mode === 'recover' && <>
@@ -864,9 +906,6 @@ export function ProfessionalsManager({ professionals, services, onCreated, onUpd
   const [editSaving, setEditSaving] = useState(false)
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [granting, setGranting] = useState(false)
-  const [grantPhone, setGrantPhone] = useState('')
-  const [grantMessage, setGrantMessage] = useState('')
-  const [grantSaving, setGrantSaving] = useState(false)
   const [specialtiesOpen, setSpecialtiesOpen] = useState(false)
   const [specialtiesLoading, setSpecialtiesLoading] = useState(false)
   const [specialtiesSaving, setSpecialtiesSaving] = useState(false)
@@ -986,20 +1025,7 @@ export function ProfessionalsManager({ professionals, services, onCreated, onUpd
     finally { setTogglingId(null) }
   }
 
-  function startGrant(professional: Professional) {
-    setGranting(true)
-    setGrantPhone(professional.phone ? fromE164BR(professional.phone) : '')
-    setGrantMessage(''); setError('')
-  }
-
-  async function submitGrant(event: FormEvent) {
-    event.preventDefault()
-    if (screen.name !== 'detail') return
-    setError(''); setGrantMessage(''); setGrantSaving(true)
-    try { setGrantMessage((await api.grantProfessionalAccess(screen.id, toE164BR(grantPhone))).message) }
-    catch (err) { setError(errorMessage(err)) }
-    finally { setGrantSaving(false) }
-  }
+  function startGrant() { setGranting(true); setError('') }
 
   const detailProfessional = screen.name === 'detail' ? professionals.find(p => p.id === screen.id) : undefined
 
@@ -1025,16 +1051,10 @@ export function ProfessionalsManager({ professionals, services, onCreated, onUpd
         <button type="button" disabled={togglingId === detailProfessional.id} onClick={() => toggleActive(detailProfessional)}>
           {togglingId === detailProfessional.id ? 'Salvando…' : detailProfessional.active ? 'Excluir' : 'Reativar'}
         </button>
-        <button type="button" onClick={() => startGrant(detailProfessional)}>Conceder acesso</button>
+        <button type="button" onClick={startGrant}>Conceder acesso</button>
         <button type="button" onClick={() => startSpecialties(detailProfessional)}>Especialidades e preços</button>
       </div>
-      {granting && <form onSubmit={submitGrant} className="quick">
-        <p>Enviar senha de acesso ao app para <b>{detailProfessional.name}</b> por SMS/WhatsApp:</p>
-        {grantMessage && <p>{grantMessage}</p>}
-        <input type="tel" placeholder="(11) 99999-0000" required value={grantPhone} onChange={e => setGrantPhone(maskPhone(e.target.value))} maxLength={16} />
-        <button disabled={grantSaving}>{grantSaving ? 'Enviando…' : 'Enviar senha'}</button>
-        <button type="button" onClick={() => setGranting(false)}>Fechar</button>
-      </form>}
+      {granting && <ProfessionalAccess key={detailProfessional.id} professional={detailProfessional} onClose={() => setGranting(false)} />}
       {specialtiesOpen && <form onSubmit={submitSpecialties} className="quick">
         <p>Serviços que <b>{detailProfessional.name}</b> pode realizar. Sem nenhum marcado, executa qualquer serviço ativo com preço/duração padrão.</p>
         {specialtiesError && <div className="alert">{specialtiesError}</div>}

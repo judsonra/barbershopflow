@@ -108,10 +108,11 @@ describe('ProfessionalsManager - grant access', () => {
 
     await userEvent.click(screen.getByText('Barbeiro'))
     await userEvent.click(screen.getByRole('button', { name: 'Conceder acesso' }))
+    await userEvent.click(screen.getByRole('radio', { name: 'Enviar por WhatsApp' }))
     await userEvent.type(screen.getByPlaceholderText('(11) 99999-0000'), '11988887777')
     await userEvent.click(screen.getByRole('button', { name: 'Enviar senha' }))
 
     expect(await screen.findByText('Senha enviada com sucesso.')).toBeInTheDocument()
-    expect(mockedApi.grantProfessionalAccess).toHaveBeenCalledWith('p1', '+5511988887777')
+    expect(mockedApi.grantProfessionalAccess).toHaveBeenCalledWith('p1', { channel: 'whatsapp', phone: '+5511988887777', email: undefined })
   })
 })

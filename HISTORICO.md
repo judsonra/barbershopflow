@@ -14,3 +14,4 @@ Formato: `data e hora | tipo | o que foi feito | rastreio`. O rastreio fica
 - 2026-11-07 15:49 -03 | feat | Adiciona pesquisa por nome ou identificador na lista de barbearias do administrador geral, no celular e no computador | pendente (branch feature/busca-barbearias)
 - 2026-11-07 16:10 -03 | feat | Cria a identidade visual por barbearia: página própria em /<slug> com logo, nome e paleta de cores escolhidas pelo gestor em Config > Identidade visual, aplicadas também dentro do app | pendente (branch feature/identidade-visual)
 - 2026-11-07 16:33 -03 | fix | A tela já abre com as cores da barbearia, sem piscar o visual padrão enquanto carrega | pendente (branch fix/tema-sem-piscar)
+- 2026-11-07 16:49 -03 | feat | Facilita o acesso do profissional: senha gerada na tela para o gestor informar, envio também por e-mail e troca de senha no Perfil para todos | pendente (branch feature/acesso-profissional)

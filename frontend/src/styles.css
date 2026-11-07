@@ -130,3 +130,15 @@ details { border: 1px dashed #c8bda9; border-radius: 11px; padding: 11px; }summa
 .file-button { position: relative; display: inline-block; }
 .file-button input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
 @media (min-width: 1024px) { .scheme-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* Conceder acesso ao profissional e alterar senha. */
+.access-channels { border: 1px solid #ddd7cc; border-radius: 11px; padding: 10px 12px; display: grid; gap: 6px; margin: 0; }
+.access-channels legend { font-size: 13px; font-weight: 600; padding: 0 4px; }
+.access-channels small { color: #7b8290; font-size: 12px; }
+.access-result { background: var(--brand-soft-2); border-radius: 11px; padding: 12px; display: grid; gap: 8px; }
+.access-result p { margin: 0; }
+.access-password { display: flex; align-items: baseline; gap: 10px; }
+.access-password small { color: #7b8290; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.access-password b { font-size: 28px; letter-spacing: .12em; font-variant-numeric: tabular-nums; }
+.access-result pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font: inherit; font-size: 13px; background: white; border-radius: 8px; padding: 10px; }
+.change-password { margin-top: 18px; }
+.change-password h3 { margin: 0; font-size: 16px; }

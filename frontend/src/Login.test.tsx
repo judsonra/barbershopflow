@@ -90,7 +90,7 @@ describe('Login - phone mode', () => {
     mockedApi.loginByPhone.mockResolvedValue({ kind: 'ok', user: baseUser })
     const onLogin = vi.fn()
     render(<Login onLogin={onLogin} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Sou cliente e entro com celular' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Entrar com celular (clientes e profissionais)' }))
 
     await userEvent.type(screen.getByLabelText('Celular'), '11999990000')
     await userEvent.type(screen.getByLabelText('Senha'), '123456')
@@ -102,7 +102,7 @@ describe('Login - phone mode', () => {
   it('redirects to recover mode on account_locked', async () => {
     mockedApi.loginByPhone.mockRejectedValue(new ApiError('conta bloqueada', 'account_locked'))
     render(<Login onLogin={vi.fn()} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Sou cliente e entro com celular' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Entrar com celular (clientes e profissionais)' }))
 
     await userEvent.type(screen.getByLabelText('Celular'), '11999990000')
     await userEvent.type(screen.getByLabelText('Senha'), 'wrong')
@@ -116,7 +116,7 @@ describe('Login - recover mode', () => {
   it('shows the server message after requesting a new password', async () => {
     mockedApi.recoverPhone.mockResolvedValue({ message: 'Se o número estiver cadastrado, uma nova senha foi enviada.' })
     render(<Login onLogin={vi.fn()} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Sou cliente e entro com celular' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Entrar com celular (clientes e profissionais)' }))
     await userEvent.click(screen.getByRole('button', { name: 'Esqueci minha senha' }))
 
     await userEvent.type(screen.getByLabelText('Celular cadastrado'), '11999990000')
@@ -179,7 +179,7 @@ describe('Login - página da barbearia (/<slug>)', () => {
     expect(screen.getByRole('img', { name: 'Logo da Junin Barber Shop' })).toHaveAttribute('src', branding.logo_url)
     expect(screen.getByLabelText('Celular')).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Sou da equipe e entro com e-mail' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Entrar com e-mail' }))
     expect(screen.queryByRole('button', { name: 'Cadastrar minha barbearia' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Entrar com Google' })).toHaveAttribute('href', '/api/v1/auth/google/start?tenant=junin')
   })
@@ -202,7 +202,7 @@ describe('Login - página da barbearia (/<slug>)', () => {
     const onLogin = vi.fn()
     render(<Login onLogin={onLogin} branding={branding} />)
 
-    await userEvent.click(screen.getByRole('button', { name: 'Sou da equipe e entro com e-mail' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Entrar com e-mail' }))
     await userEvent.type(screen.getByLabelText('E-mail'), 'cli@x.com')
     await userEvent.type(screen.getByLabelText('Senha'), 's3cret123')
     await userEvent.click(screen.getByRole('button', { name: 'Entrar' }))

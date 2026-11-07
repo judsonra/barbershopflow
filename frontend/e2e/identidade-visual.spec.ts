@@ -75,7 +75,7 @@ test.describe('Identidade visual da barbearia', () => {
     expect(await logo.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(64)
     expect(await cssVar(anon, '--brand-dark')).toBe(VINHO_DARK)
     await expect(anon.getByLabel('Celular')).toBeVisible()
-    await anon.getByRole('button', { name: 'Sou da equipe e entro com e-mail' }).click()
+    await anon.getByRole('button', { name: 'Entrar com e-mail' }).click()
     await expect(anon.getByRole('button', { name: 'Cadastrar minha barbearia' })).toHaveCount(0)
 
     // E o gestor entra pela própria página e continua com a marca.
