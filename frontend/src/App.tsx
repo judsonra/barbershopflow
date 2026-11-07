@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { api, ApiError } from './api'
 import { downloadICS, googleCalendarUrl } from './calendar'
-import { applyTheme, tenantSlugFromPath } from './branding'
+import { applyTheme, forgetSessionTheme, rememberSessionTheme, rememberSlugTheme, tenantSlugFromPath } from './branding'
 import { BrandingConfig } from './BrandingConfig'
 import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
 import type { PublicTenant, AdminCustomerMatch, Appointment, Customer, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, Service, Tenant, TimeOff, User } from './types'
@@ -45,21 +45,28 @@ export default function App() {
 
   // Logged out, the page wears the brand of the /<slug> being visited (or
   // the default). Logged in, AgendaApp/AdminPanel apply their own theme.
-  useEffect(() => { if (!user) applyTheme(branding?.color_scheme) }, [user, branding])
+  // Waits for the session check and the /<slug> lookup: resetting to the
+  // default while they're in flight would undo the theme main.tsx restored.
+  useEffect(() => {
+    if (user || checkingSession || loadingBranding) return
+    applyTheme(branding?.color_scheme)
+    if (branding) rememberSlugTheme(branding.slug, branding.color_scheme)
+  }, [user, checkingSession, loadingBranding, branding])
 
   useEffect(() => {
-    api.onSessionExpired(() => setUser(null))
+    api.onSessionExpired(() => { forgetSessionTheme(); setUser(null) })
     const { error, choice } = api.consumeOAuthRedirect()
     if (error) setOauthError(error)
     if (choice) setInitialChoice(choice)
     if (!api.isAuthenticated()) { setCheckingSession(false); return }
-    api.me().then(setUser).catch(() => api.logout()).finally(() => setCheckingSession(false))
+    api.me().then(setUser).catch(() => { api.logout(); forgetSessionTheme() }).finally(() => setCheckingSession(false))
   }, [])
 
   if (checkingSession || loadingBranding) return <div className="empty">Carregando…</div>
   if (!user) return <Login onLogin={setUser} initialError={oauthError} initialChoice={initialChoice} branding={branding} />
-  if (user.role === 'superadmin') return <AdminPanel user={user} onImpersonate={setUser} onLogout={() => { api.logout(); setUser(null) }} />
-  return <AgendaApp user={user} onLogout={() => { api.logout(); setUser(null) }} />
+  const logout = () => { api.logout(); forgetSessionTheme(); setUser(null) }
+  if (user.role === 'superadmin') return <AdminPanel user={user} onImpersonate={setUser} onLogout={logout} />
+  return <AgendaApp user={user} onLogout={logout} />
 }
 
 // A superadmin doesn't operate inside any single tenant — it only lists
@@ -87,7 +94,7 @@ export function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onIm
 
   useEffect(() => { void load() }, [load])
   // The superadmin isn't inside any barbershop, so always the default look.
-  useEffect(() => { applyTheme(null) }, [])
+  useEffect(() => { applyTheme(null); rememberSessionTheme(null) }, [])
 
   // The admin list already comes back whole, so filtering is local and
   // instant: by name or slug, ignoring case and accents ("joao" finds "João").
@@ -423,7 +430,9 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
     setLoading(true); setError('')
     try {
       const [agenda, serviceList, professionalList, tenantInfo, customerList] = await Promise.all([
-        api.appointments(bounds.from, bounds.to), api.services(), api.professionals(), api.tenant(),
+        // /tenant is set as soon as it answers (it carries the theme), not
+        // after the heavier agenda and lists.
+        api.appointments(bounds.from, bounds.to), api.services(), api.professionals(), api.tenant().then(t => { setTenant(t); return t }),
         isClient ? Promise.resolve([]) : api.customers()
       ])
       setAppointments(agenda); setServices(serviceList); setProfessionals(professionalList)
@@ -435,7 +444,11 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
   useEffect(() => { void load() }, [load])
   // Everyone inside a barbershop (manager, professional, client) sees its
   // brand, whichever URL they came in through.
-  useEffect(() => { if (tenant) applyTheme(tenant.color_scheme) }, [tenant])
+  useEffect(() => {
+    if (!tenant) return
+    applyTheme(tenant.color_scheme)
+    rememberSessionTheme(tenant.color_scheme)
+  }, [tenant])
 
   async function changeStatus(item: Appointment, status: Appointment['status']) {
     try { await api.updateStatus(item.id, status); await load() }

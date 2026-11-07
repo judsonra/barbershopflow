@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { applyTheme, COLOR_SCHEMES, findScheme, RESERVED_SLUGS, tenantSlugFromPath } from './branding'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { applyTheme, COLOR_SCHEMES, findScheme, forgetSessionTheme, rememberSessionTheme, rememberSlugTheme, RESERVED_SLUGS, restoreTheme, tenantSlugFromPath } from './branding'
 
 describe('tenantSlugFromPath', () => {
   it.each([
@@ -43,5 +43,40 @@ describe('applyTheme', () => {
 
   it('tem as mesmas 8 paletas do backend', () => {
     expect(COLOR_SCHEMES.map(s => s.id)).toEqual(['classico', 'marinho', 'vinho', 'floresta', 'grafite', 'terracota', 'oceano', 'lavanda'])
+  })
+})
+
+describe('restoreTheme (paleta lembrada antes do primeiro render)', () => {
+  afterEach(() => { localStorage.clear(); applyTheme(null); vi.restoreAllMocks() })
+  const current = () => document.documentElement.dataset.colorScheme
+
+  it('logado: aplica a paleta da barbearia em que entrou', () => {
+    rememberSessionTheme('oceano')
+    expect(restoreTheme('/', true)).toBe('oceano')
+    expect(current()).toBe('oceano')
+  })
+
+  it('sem sessão: aplica só a paleta lembrada da página /<slug>', () => {
+    rememberSessionTheme('oceano')
+    rememberSlugTheme('junin', 'vinho')
+    expect(restoreTheme('/junin', false)).toBe('vinho')
+    expect(current()).toBe('vinho')
+    applyTheme(null)
+    expect(restoreTheme('/', false)).toBeNull()
+    expect(restoreTheme('/outra', false)).toBeNull()
+    expect(current()).toBe('classico')
+  })
+
+  it('logout esquece a paleta da sessão', () => {
+    rememberSessionTheme('lavanda')
+    forgetSessionTheme()
+    expect(restoreTheme('/', true)).toBeNull()
+  })
+
+  it('sem localStorage disponível, não quebra e não aplica nada', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('bloqueado') })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('bloqueado') })
+    expect(() => rememberSessionTheme('vinho')).not.toThrow()
+    expect(restoreTheme('/', true)).toBeNull()
   })
 })

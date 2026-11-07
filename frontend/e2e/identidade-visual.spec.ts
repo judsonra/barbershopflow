@@ -85,6 +85,35 @@ test.describe('Identidade visual da barbearia', () => {
     await expect(anon.getByText('Sua agenda')).toBeVisible()
     expect(await cssVar(anon, '--brand-dark')).toBe(VINHO_DARK)
     await visitor.close()
+
+    // Sem piscar: ao reabrir, a paleta lembrada já está aplicada enquanto
+    // /tenant ainda nem respondeu (atrasado de propósito).
+    let releaseTenant: () => void = () => {}
+    const tenantHeld = new Promise<void>(resolve => { releaseTenant = resolve })
+    await page.route('**/api/v1/tenant', async route => { await tenantHeld; await route.continue() })
+    await page.reload()
+    await expect(page.locator('header')).toBeVisible()
+    expect(await cssVar(page, '--brand-dark')).toBe(VINHO_DARK)
+    const tenantAnswered = page.waitForResponse('**/api/v1/tenant')
+    releaseTenant()
+    await tenantAnswered
+
+    // O mesmo na página pública, com a consulta da marca atrasada.
+    const second = await browser.newContext()
+    const again = await second.newPage()
+    await again.goto(`/${manager.slug}`)
+    await expect(again.getByRole('heading', { name: tenantName })).toBeVisible()
+    let releasePublic: () => void = () => {}
+    const publicHeld = new Promise<void>(resolve => { releasePublic = resolve })
+    await again.route('**/api/v1/public/tenants/**', async route => { await publicHeld; await route.continue() })
+    await again.reload()
+    await expect(again.getByText('Carregando…')).toBeVisible()
+    expect(await cssVar(again, '--brand-dark')).toBe(VINHO_DARK)
+    const publicAnswered = again.waitForResponse('**/api/v1/public/tenants/**')
+    releasePublic()
+    await publicAnswered
+    await expect(again.getByRole('heading', { name: tenantName })).toBeVisible()
+    await second.close()
   })
 
   test('slug inexistente cai na tela padrão com aviso', async ({ page }) => {

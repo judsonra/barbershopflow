@@ -49,6 +49,38 @@ export function applyTheme(id?: string | null) {
   meta.content = scheme.vars.dark
 }
 
+// Lembra a última paleta para a próxima abertura já pintar com ela, antes de
+// qualquer resposta da rede: `bf_theme` para quem está logado (a paleta da
+// barbearia em que entrou) e `bf_theme:<slug>` para cada página pública.
+// localStorage pode estar indisponível (aba anônima, dados bloqueados): aí só
+// não há memória, e o app funciona como antes.
+const SESSION_THEME_KEY = 'bf_theme'
+const slugThemeKey = (slug: string) => `bf_theme:${slug}`
+
+function storageGet(key: string): string | null {
+  try { return window.localStorage.getItem(key) } catch { return null }
+}
+function storageSet(key: string, value: string | null) {
+  try {
+    if (value === null) window.localStorage.removeItem(key)
+    else window.localStorage.setItem(key, value)
+  } catch { /* sem armazenamento: segue sem memória */ }
+}
+
+export function rememberSessionTheme(id: string | null | undefined) { storageSet(SESSION_THEME_KEY, findScheme(id).id) }
+export function forgetSessionTheme() { storageSet(SESSION_THEME_KEY, null) }
+export function rememberSlugTheme(slug: string, id: string | null | undefined) { storageSet(slugThemeKey(slug), findScheme(id).id) }
+
+// Chamado no main.tsx antes do React: aplica a paleta lembrada para esta
+// abertura. Devolve o id aplicado, ou null se não havia nada lembrado.
+export function restoreTheme(pathname: string, isAuthenticated: boolean): string | null {
+  const slug = tenantSlugFromPath(pathname)
+  const id = isAuthenticated ? storageGet(SESSION_THEME_KEY) : slug ? storageGet(slugThemeKey(slug)) : null
+  if (!id) return null
+  applyTheme(id)
+  return findScheme(id).id
+}
+
 // Mesma lista de domain.ReservedSlugs: caminhos que pertencem ao próprio app.
 export const RESERVED_SLUGS = ['api', 'health', 'assets', 'admin', 'login', 'static', 'app', 'www']
 const SLUG_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/
