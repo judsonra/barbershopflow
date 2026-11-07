@@ -11,3 +11,4 @@ Formato: `data e hora | tipo | o que foi feito | rastreio`. O rastreio fica
 - 2026-11-02 17:22 -03 | docs | Registra no TODO.md as pendências encontradas no levantamento do projeto | pendente (branch docs/todo-pendencias)
 - 2026-11-02 17:34 -03 | fix | Passa a validar jornada, feriados e relatórios no fuso de cada barbearia, configurável em Config > Barbearia, e cria o manual do usuário | pendente (branch fix/fuso-agenda)
 - 2026-11-07 15:46 -03 | feat | Aproveita a tela no computador: menu na lateral, listas em várias colunas e barra de rolagem sempre visível, sem mudar o celular | pendente (branch feature/layout-desktop)
+- 2026-11-07 15:49 -03 | feat | Adiciona pesquisa por nome ou identificador na lista de barbearias do administrador geral, no celular e no computador | pendente (branch feature/busca-barbearias)

@@ -12,4 +12,5 @@ Ele está começando a ser escrito, e novos assuntos entram conforme o sistema
 muda. Por enquanto, você encontra aqui:
 
 - [Usar no computador](usar-no-computador.md)
+- [Pesquisar barbearias (administrador geral)](pesquisar-barbearias.md)
 - [Definir o fuso horário da barbearia](barbearia/fuso-horario.md)
