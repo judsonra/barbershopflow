@@ -50,6 +50,7 @@ export function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onIm
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [tenantQuery, setTenantQuery] = useState('')
   const [customerQuery, setCustomerQuery] = useState('')
   const [customerResults, setCustomerResults] = useState<AdminCustomerMatch[]>([])
   const [searching, setSearching] = useState(false)
@@ -64,6 +65,15 @@ export function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onIm
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // The admin list already comes back whole, so filtering is local and
+  // instant: by name or slug, ignoring case and accents ("joao" finds "João").
+  const filteredTenants = useMemo(() => {
+    const normalize = (value: string) => value.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    const query = normalize(tenantQuery.trim())
+    if (!query) return tenants
+    return tenants.filter(t => normalize(t.name).includes(query) || normalize(t.slug).includes(query))
+  }, [tenants, tenantQuery])
 
   // Search-as-you-type, same 400ms debounce as the tenant-name check on
   // signup — an empty query just clears the results instead of round-tripping.
@@ -105,11 +115,19 @@ export function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onIm
       {view === 'tenants' && <>
         {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
         {loading ? <div className="empty">Carregando…</div> :
-          tenants.length === 0 ? <div className="empty"><span>🏠</span><h2>Nenhuma barbearia</h2></div> :
-          <ul className="tenant-list">{tenants.map(t => <li key={t.id}>
+          tenants.length === 0 ? <div className="empty"><span>🏠</span><h2>Nenhuma barbearia</h2></div> : <>
+          <div className="list-search">
+            <label>Pesquisar barbearia
+              <input type="search" value={tenantQuery} onChange={e => setTenantQuery(e.target.value)} placeholder="Nome ou identificador…" />
+            </label>
+            <small aria-live="polite">{tenantQuery.trim() ? `${filteredTenants.length} de ${tenants.length}` : `${tenants.length}`} barbearia(s)</small>
+          </div>
+          {filteredTenants.length === 0 ? <div className="empty"><span>🔎</span><h2>Nenhuma barbearia encontrada</h2><p>Confira o nome ou limpe a pesquisa.</p></div> :
+          <ul className="tenant-list">{filteredTenants.map(t => <li key={t.id}>
             <div><b>{t.name}</b><small>{t.slug}{!t.active ? ' · inativa' : ''}</small></div>
             <button onClick={() => void access(t.id)}>Acessar como gestor</button>
           </li>)}</ul>}
+        </>}
       </>}
 
       {view === 'customers' && <>
