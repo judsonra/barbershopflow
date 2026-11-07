@@ -13,11 +13,15 @@
   Pode sugerir o próprio horário se a barbearia habilitar o autoagendamento —
   ver seção própria abaixo.
 - **Profissional:** barbeiro disponível para receber agendamentos. Autentica
-  com papel `professional`, por login social (Google/Facebook) se tiver
-  e-mail cadastrado, ou por celular + senha temporária se não tiver — o
-  gestor concede esse acesso pela primeira vez (ou renova) em
-  `POST /api/v1/professionals/{id}/credentials`, senha enviada por
-  SMS/WhatsApp, mesmo mecanismo usado para cliente. Só enxerga a própria
+  com papel `professional`, por celular + senha, por e-mail + senha ou por
+  login social (Google/Facebook) se tiver e-mail cadastrado. O gestor
+  concede esse acesso pela primeira vez (ou renova) em
+  `POST /api/v1/professionals/{id}/credentials`, escolhendo como a senha
+  temporária (6 dígitos) chega ao profissional: WhatsApp ou SMS (Zenvia),
+  e-mail (SMTP) ou **gerada na tela para o gestor informar pessoalmente**
+  (nada é enviado — o caminho que funciona sem Zenvia nem SMTP). O
+  profissional (como qualquer usuário) troca a senha em Perfil > Alterar
+  senha; a senha é da pessoa, então muda em todas as barbearias. Só enxerga a própria
   agenda (`GET /api/v1/appointments` filtra por `professional_id`), só pode
   alterar o status de agendamentos onde é o profissional responsável; também
   pode cadastrar clientes e conceder acesso por celular a eles.
@@ -60,6 +64,23 @@ acesso a redes confiáveis.
    social de um cliente totalmente novo (identidade nova ou identidade
    existente sem vínculo ainda naquela barbearia), que precisa do
    `?tenant=<slug>` da barbearia (ver [docs/api.md](api.md)).
+4. **Identidade visual (white label):** cada barbearia tem uma página em
+   `http://<domínio>/<slug>` com sua logo, nome e cores, configuradas pelo
+   gestor em Config > Identidade visual.
+   - Cores: só paletas prontas (Clássico, Azul marinho, Vinho, Verde
+     floresta, Grafite, Terracota, Oceano, Lavanda), para garantir contraste
+     e legibilidade. Barbearia nova começa no Clássico.
+   - Logo: PNG, JPG ou WebP de até 1 MB (recomendado 512×512 px). SVG não é
+     aceito por poder carregar scripts.
+   - A página abre o login com a marca, começando pelo login do cliente por
+     celular e sem "Cadastrar minha barbearia". Quem tem acesso a várias
+     barbearias e entra pela página de uma delas cai direto nela.
+   - Depois do login, gestor, profissionais e clientes da barbearia veem o
+     app com a marca dela, entrando pela página própria ou não. O superadmin
+     vê sempre o visual padrão.
+   - O slug é o endereço da página: trocá-lo muda o link, e o antigo deixa
+     de funcionar. Slugs que coincidem com caminhos do app (`api`,
+     `admin`, `login`...) são reservados.
 
 ### Serviços
 

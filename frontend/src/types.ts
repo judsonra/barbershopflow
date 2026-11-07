@@ -6,7 +6,10 @@ export type MembershipOption = { membership_id: string; tenant_id: string; tenan
 export type Tenant = {
   id: string; name: string; slug: string
   self_scheduling_enabled: boolean; auto_confirm_appointments: boolean; cancellation_window_hours: number; timezone: string; active: boolean; created_at: string
+  color_scheme?: string; logo_url?: string
 }
+// What anyone can see about a barbershop at http://domain/<slug>.
+export type PublicTenant = { name: string; slug: string; color_scheme: string; logo_url?: string }
 export type Service = { id: string; name: string; duration_minutes: number; price_cents: number; active: boolean }
 export type Professional = { id: string; name: string; phone?: string; email?: string; cpf?: string; active: boolean }
 export type ScheduleEntry = { weekday: number; start_minute: number; end_minute: number }
@@ -34,5 +37,7 @@ export type Report = {
   revenue: { total_cents: number; by_professional: ProfessionalRevenue[] }
   retention: { total_customers: number; returning_customers: number; rate: number }
 }
-
+export type AccessChannel = 'whatsapp' | 'sms' | 'email' | 'manual'
+// password/login/login_url only come back for the 'manual' channel.
+export type AccessGrant = { message: string; password?: string; login?: string; login_url?: string }
 export type ProfessionalCommission = { service_id: string; type: 'percentage' | 'fixed'; value: number }

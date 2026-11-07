@@ -24,8 +24,22 @@ var errUnmapped = errors.New("unmapped store error")
 // Zenvia, so handler tests can assert a password/notification was (or
 // wasn't) sent without any network access.
 type fakeNotifier struct {
-	sent []notifierCall
-	err  error
+	sent   []notifierCall
+	emails []emailCall
+	err    error
+}
+
+type emailCall struct {
+	To, Name, Password, LoginURL string
+}
+
+// SendPasswordEmail makes fakeNotifier double as the Mailer.
+func (f *fakeNotifier) SendPasswordEmail(_ context.Context, to, name, password, loginURL string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.emails = append(f.emails, emailCall{To: to, Name: name, Password: password, LoginURL: loginURL})
+	return nil
 }
 
 type notifierCall struct {
@@ -41,6 +55,7 @@ func (f *fakeNotifier) SendPassword(_ context.Context, phone, password, channel 
 }
 
 var _ notify.Notifier = (*fakeNotifier)(nil)
+var _ notify.Mailer = (*fakeNotifier)(nil)
 
 const testTokenSecret = "test-secret"
 
@@ -53,6 +68,7 @@ func newTestServer(store *fakeStore) (http.Handler, *auth.Tokenizer, *fakeNotifi
 		Origins:     "http://localhost",
 		Tokenizer:   tok,
 		Notifier:    notifier,
+		Mailer:      notifier,
 		FrontendURL: "http://localhost:5173",
 	})
 	return handler, tok, notifier

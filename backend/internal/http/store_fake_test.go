@@ -33,6 +33,7 @@ type fakeStore struct {
 	identities  map[string]domain.Identity
 	memberships map[string]domain.User
 	tenants     map[string]domain.Tenant
+	logos       map[string]fakeLogo // by tenantID
 
 	membershipOptions map[string][]domain.MembershipOption // by identityID
 	audits            []domain.ImpersonationAudit
@@ -65,6 +66,7 @@ func newFakeStore() *fakeStore {
 		identities:        map[string]domain.Identity{},
 		memberships:       map[string]domain.User{},
 		tenants:           map[string]domain.Tenant{},
+		logos:             map[string]fakeLogo{},
 		membershipOptions: map[string][]domain.MembershipOption{},
 		errs:              map[string]error{},
 	}
@@ -708,12 +710,110 @@ func (s *fakeStore) UpdateTenant(_ context.Context, tenantID, name, slug string,
 	return t, nil
 }
 
+func (s *fakeStore) SetIdentityEmail(_ context.Context, identityID, email string) error {
+	if err := s.err("SetIdentityEmail"); err != nil {
+		return err
+	}
+	for id, other := range s.identities {
+		if id != identityID && strings.EqualFold(other.Email, email) {
+			return domain.ErrConflict
+		}
+	}
+	identity, ok := s.identities[identityID]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	identity.Email = email
+	s.identities[identityID] = identity
+	for id, m := range s.memberships {
+		if m.IdentityID == identityID {
+			m.Email = email
+			s.memberships[id] = m
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) UpdateProfessionalEmail(_ context.Context, tenantID, professionalID, email string) error {
+	if err := s.err("UpdateProfessionalEmail"); err != nil {
+		return err
+	}
+	p, ok := s.professionals[tenantID][professionalID]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	p.Email = email
+	s.professionals[tenantID][professionalID] = p
+	return nil
+}
+
+type fakeLogo struct {
+	contentType string
+	data        []byte
+}
+
+func (s *fakeStore) UpdateTenantBranding(_ context.Context, tenantID, colorScheme string) (domain.Tenant, error) {
+	if err := s.err("UpdateTenantBranding"); err != nil {
+		return domain.Tenant{}, err
+	}
+	t, ok := s.tenants[tenantID]
+	if !ok {
+		return domain.Tenant{}, domain.ErrNotFound
+	}
+	t.ColorScheme = colorScheme
+	s.tenants[tenantID] = t
+	return t, nil
+}
+
+func (s *fakeStore) SetTenantLogo(_ context.Context, tenantID, contentType string, data []byte) (domain.Tenant, error) {
+	if err := s.err("SetTenantLogo"); err != nil {
+		return domain.Tenant{}, err
+	}
+	t, ok := s.tenants[tenantID]
+	if !ok {
+		return domain.Tenant{}, domain.ErrNotFound
+	}
+	now := time.Now()
+	t.LogoUpdatedAt = &now
+	s.tenants[tenantID] = t
+	s.logos[tenantID] = fakeLogo{contentType: contentType, data: data}
+	return t, nil
+}
+
+func (s *fakeStore) DeleteTenantLogo(_ context.Context, tenantID string) (domain.Tenant, error) {
+	if err := s.err("DeleteTenantLogo"); err != nil {
+		return domain.Tenant{}, err
+	}
+	t, ok := s.tenants[tenantID]
+	if !ok {
+		return domain.Tenant{}, domain.ErrNotFound
+	}
+	t.LogoUpdatedAt = nil
+	s.tenants[tenantID] = t
+	delete(s.logos, tenantID)
+	return t, nil
+}
+
+func (s *fakeStore) GetTenantLogo(_ context.Context, slug string) (string, []byte, error) {
+	if err := s.err("GetTenantLogo"); err != nil {
+		return "", nil, err
+	}
+	for id, t := range s.tenants {
+		if t.Slug == slug && t.Active {
+			if logo, ok := s.logos[id]; ok {
+				return logo.contentType, logo.data, nil
+			}
+		}
+	}
+	return "", nil, domain.ErrNotFound
+}
+
 func (s *fakeStore) CreateTenantWithManager(_ context.Context, tenantName, slug, managerName, email, passwordHash string) (domain.Tenant, domain.User, error) {
 	if err := s.err("CreateTenantWithManager"); err != nil {
 		return domain.Tenant{}, domain.User{}, err
 	}
 	tenantID := s.newID("tenant")
-	tenant := domain.Tenant{ID: tenantID, Name: tenantName, Slug: slug, Active: true, CreatedAt: time.Now()}
+	tenant := domain.Tenant{ID: tenantID, Name: tenantName, Slug: slug, ColorScheme: domain.DefaultColorScheme, Active: true, CreatedAt: time.Now()}
 	s.tenants[tenantID] = tenant
 
 	identityID := s.newID("identity")

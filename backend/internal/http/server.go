@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +48,7 @@ type Store interface {
 	LinkGoogleID(ctx context.Context, identityID, googleID string) error
 	LinkFacebookID(ctx context.Context, identityID, facebookID string) error
 	SetPassword(ctx context.Context, identityID, passwordHash string) error
+	SetIdentityEmail(ctx context.Context, identityID, email string) error
 	ResetLoginAttempts(ctx context.Context, identityID string) error
 	IncrementFailedLogin(ctx context.Context, identityID string) (bool, error)
 	GetMembershipByID(ctx context.Context, membershipID string) (domain.User, error)
@@ -59,12 +62,17 @@ type Store interface {
 	CreateIdentityWithMembership(ctx context.Context, name, email, phone, passwordHash, googleID, facebookID, tenantID, role, professionalID, customerID string) (domain.User, error)
 	GetProfessionalByID(ctx context.Context, tenantID, id string) (domain.Professional, error)
 	UpdateProfessionalPhone(ctx context.Context, tenantID, professionalID, phone string) error
+	UpdateProfessionalEmail(ctx context.Context, tenantID, professionalID, email string) error
 	GetTenantBySlug(ctx context.Context, slug string) (domain.Tenant, error)
 	TenantNameAvailable(ctx context.Context, name string) (bool, error)
 	ListTenants(ctx context.Context) ([]domain.Tenant, error)
 	GetFirstManagerByTenant(ctx context.Context, tenantID string) (domain.User, error)
 	GetTenantByID(ctx context.Context, id string) (domain.Tenant, error)
 	UpdateTenant(ctx context.Context, tenantID, name, slug string, selfSchedulingEnabled, autoConfirmAppointments bool, cancellationWindowHours int, timezone string) (domain.Tenant, error)
+	UpdateTenantBranding(ctx context.Context, tenantID, colorScheme string) (domain.Tenant, error)
+	SetTenantLogo(ctx context.Context, tenantID, contentType string, data []byte) (domain.Tenant, error)
+	DeleteTenantLogo(ctx context.Context, tenantID string) (domain.Tenant, error)
+	GetTenantLogo(ctx context.Context, slug string) (string, []byte, error)
 	ListHolidays(ctx context.Context, tenantID string) ([]domain.Holiday, error)
 	CreateHoliday(ctx context.Context, tenantID string, item domain.Holiday) (domain.Holiday, error)
 	DeleteHoliday(ctx context.Context, tenantID, id string) error
@@ -87,6 +95,7 @@ type Config struct {
 	Google      *auth.SocialProvider
 	Facebook    *auth.SocialProvider
 	Notifier    notify.Notifier
+	Mailer      notify.Mailer
 	FrontendURL string
 }
 
@@ -100,6 +109,9 @@ type ctxKey string
 const claimsContextKey ctxKey = "claims"
 
 func New(store Store, cfg Config) http.Handler {
+	if cfg.Mailer == nil {
+		cfg.Mailer = notify.NewMailer(notify.SMTPConfig{})
+	}
 	s := &server{store: store, cfg: cfg}
 
 	public := http.NewServeMux()
@@ -116,9 +128,12 @@ func New(store Store, cfg Config) http.Handler {
 	public.HandleFunc("GET /api/v1/auth/google/callback", s.oauthCallback(s.cfg.Google, "google"))
 	public.HandleFunc("GET /api/v1/auth/facebook/start", s.oauthStart(s.cfg.Facebook))
 	public.HandleFunc("GET /api/v1/auth/facebook/callback", s.oauthCallback(s.cfg.Facebook, "facebook"))
+	public.HandleFunc("GET /api/v1/public/tenants/{slug}", s.publicTenant)
+	public.HandleFunc("GET /api/v1/public/tenants/{slug}/logo", s.publicTenantLogo)
 
 	protected := http.NewServeMux()
 	protected.HandleFunc("GET /api/v1/auth/me", s.me)
+	protected.HandleFunc("POST /api/v1/auth/password", s.changePassword)
 	protected.HandleFunc("GET /api/v1/admin/tenants", s.requireRole(domain.RoleSuperAdmin, s.listTenantsAdmin))
 	protected.HandleFunc("POST /api/v1/admin/tenants/{id}/impersonate", s.requireRole(domain.RoleSuperAdmin, s.impersonateTenant))
 	protected.HandleFunc("GET /api/v1/admin/customers", s.requireRole(domain.RoleSuperAdmin, s.adminSearchCustomers))
@@ -126,6 +141,9 @@ func New(store Store, cfg Config) http.Handler {
 	protected.HandleFunc("GET /api/v1/admin/audit", s.requireRole(domain.RoleSuperAdmin, s.adminListAudit))
 	protected.HandleFunc("GET /api/v1/tenant", s.getTenant)
 	protected.HandleFunc("PATCH /api/v1/tenant", s.requireRole(domain.RoleManager, s.updateTenant))
+	protected.HandleFunc("PATCH /api/v1/tenant/branding", s.requireRole(domain.RoleManager, s.updateTenantBranding))
+	protected.HandleFunc("PUT /api/v1/tenant/logo", s.requireRole(domain.RoleManager, s.uploadTenantLogo))
+	protected.HandleFunc("DELETE /api/v1/tenant/logo", s.requireRole(domain.RoleManager, s.deleteTenantLogo))
 	protected.HandleFunc("GET /api/v1/tenant/holidays", s.listHolidays)
 	protected.HandleFunc("POST /api/v1/tenant/holidays", s.requireRole(domain.RoleManager, s.createHoliday))
 	protected.HandleFunc("DELETE /api/v1/tenant/holidays/{id}", s.requireRole(domain.RoleManager, s.deleteHoliday))
@@ -205,6 +223,10 @@ func (s *server) createTenant(w http.ResponseWriter, r *http.Request) {
 	}
 	if !slugPattern.MatchString(body.Slug) {
 		writeError(w, http.StatusBadRequest, "validation_error", "slug deve conter apenas letras minúsculas, números e hífen")
+		return
+	}
+	if domain.IsReservedSlug(body.Slug) {
+		writeError(w, http.StatusBadRequest, "validation_error", "este slug é reservado pelo sistema, escolha outro")
 		return
 	}
 	if len(body.Password) < 8 {
@@ -438,19 +460,33 @@ func (s *server) grantCustomerAccess(w http.ResponseWriter, r *http.Request) {
 	if body.Channel == notify.ChannelSMS {
 		channel = notify.ChannelSMS
 	}
-	s.grantAccess(w, r, claims.TenantID, domain.RoleClient, customer.Name, phone, "", customerID, channel)
+	s.grantAccess(w, r, claims.TenantID, domain.RoleClient, customer.Name, accessDelivery{Channel: channel, Phone: phone}, "", customerID)
 }
 
 // grantProfessionalAccess mirrors grantCustomerAccess, just for a
 // professional's own login instead of a client's. Manager-only: unlike
 // registering a customer, handing out a coworker's login is a step up in
 // sensitivity, so professionals can't grant this to themselves or others.
+//
+// channel picks how the temporary password reaches the professional:
+// "whatsapp" (default) or "sms" through Zenvia, "email" through SMTP, or
+// "manual" — nothing is sent and the password comes back in the response,
+// for the manager to hand over in person when there's no messaging set up.
 func (s *server) grantProfessionalAccess(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Phone   string `json:"phone"`
+		Email   string `json:"email"`
 		Channel string `json:"channel"`
 	}
 	if !decode(w, r, &body) {
+		return
+	}
+	channel := body.Channel
+	if channel == "" {
+		channel = notify.ChannelWhatsApp
+	}
+	if channel != notify.ChannelWhatsApp && channel != notify.ChannelSMS && channel != channelEmail && channel != channelManual {
+		writeError(w, http.StatusBadRequest, "validation_error", "forma de envio inválida")
 		return
 	}
 	claims, _ := claimsFromContext(r)
@@ -464,21 +500,61 @@ func (s *server) grantProfessionalAccess(w http.ResponseWriter, r *http.Request)
 	if phone == "" {
 		phone = professional.Phone
 	}
-	if phone == "" {
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	if email == "" {
+		email = strings.ToLower(professional.Email)
+	}
+	switch {
+	case (channel == notify.ChannelWhatsApp || channel == notify.ChannelSMS) && phone == "":
 		writeError(w, http.StatusBadRequest, "validation_error", "celular é obrigatório")
 		return
+	case channel == channelEmail && email == "":
+		writeError(w, http.StatusBadRequest, "validation_error", "e-mail é obrigatório para enviar por e-mail")
+		return
+	case channel == channelManual && phone == "" && email == "":
+		writeError(w, http.StatusBadRequest, "validation_error", "informe o celular ou o e-mail com que o profissional vai entrar")
+		return
 	}
-	if phone != professional.Phone {
+	if email != "" && !emailPattern.MatchString(email) {
+		writeError(w, http.StatusBadRequest, "validation_error", "e-mail inválido")
+		return
+	}
+	if phone != professional.Phone && phone != "" {
 		if err := s.store.UpdateProfessionalPhone(r.Context(), claims.TenantID, professionalID, phone); err != nil {
 			handleError(w, err)
 			return
 		}
 	}
-	channel := notify.ChannelWhatsApp
-	if body.Channel == notify.ChannelSMS {
-		channel = notify.ChannelSMS
+	if email != strings.ToLower(professional.Email) && email != "" {
+		if err := s.store.UpdateProfessionalEmail(r.Context(), claims.TenantID, professionalID, email); err != nil {
+			handleError(w, err)
+			return
+		}
 	}
-	s.grantAccess(w, r, claims.TenantID, domain.RoleProfessional, professional.Name, phone, professionalID, "", channel)
+	s.grantAccess(w, r, claims.TenantID, domain.RoleProfessional, professional.Name, accessDelivery{
+		Channel: channel, Phone: phone, Email: email, LoginURL: s.tenantLoginURL(r.Context(), claims.TenantID),
+	}, professionalID, "")
+}
+
+const (
+	channelEmail  = "email"
+	channelManual = "manual"
+)
+
+// accessDelivery is where and how a granted password goes. Phone and Email
+// are also the logins stored on a brand-new identity.
+type accessDelivery struct {
+	Channel, Phone, Email, LoginURL string
+}
+
+// tenantLoginURL is the barbershop's own page, sent along with the password.
+func (s *server) tenantLoginURL(ctx context.Context, tenantID string) string {
+	base := strings.TrimRight(s.cfg.FrontendURL, "/")
+	tenant, err := s.store.GetTenantByID(ctx, tenantID)
+	if err != nil || tenant.Slug == "" {
+		return base
+	}
+	return base + "/" + tenant.Slug
 }
 
 // grantAccess is the shared resolution behind grantCustomerAccess and
@@ -486,44 +562,42 @@ func (s *server) grantProfessionalAccess(w http.ResponseWriter, r *http.Request)
 // set depending on the caller. Three cases:
 //  1. This exact customer/professional already has a membership (staff
 //     clicking the button again to recover a forgotten/locked password):
-//     regenerate and resend the password, same as before the
+//     regenerate and deliver the password, same as before the
 //     identity/membership split.
-//  2. The phone belongs to an identity that already has access somewhere
-//     else (this same person already uses another barbershop): attach a
-//     membership here without touching the password — it's the same
-//     password everywhere, so there's nothing to regenerate or resend.
-//  3. Nobody has ever seen this phone before: create the identity, the
-//     membership, and a fresh password together.
-func (s *server) grantAccess(w http.ResponseWriter, r *http.Request, tenantID, role, name, phone, professionalID, customerID, channel string) {
+//  2. The e-mail or phone belongs to an identity that already has access
+//     somewhere else (this same person already uses another barbershop):
+//     attach a membership here without touching the password — it's the
+//     same password everywhere, so there's nothing to regenerate or resend.
+//  3. Nobody has ever seen this e-mail/phone before: create the identity,
+//     the membership, and a fresh password together.
+func (s *server) grantAccess(w http.ResponseWriter, r *http.Request, tenantID, role, name string, d accessDelivery, professionalID, customerID string) {
 	existing, err := s.findExistingMembership(r.Context(), professionalID, customerID)
 	if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		handleError(w, err)
 		return
 	}
 	if err == nil {
-		password, err := auth.GenerateTempPassword()
-		if err != nil {
-			handleError(w, err)
+		// Granting by e-mail to someone who only had a phone login adds the
+		// e-mail login; one they already have stays as it is.
+		if d.Email != "" && existing.Email == "" {
+			if err := s.store.SetIdentityEmail(r.Context(), existing.IdentityID, d.Email); err != nil {
+				handleError(w, err)
+				return
+			}
+			existing.Email = d.Email
+		}
+		if existing.Email != "" {
+			d.Email = existing.Email
+		}
+		password, ok := s.newPassword(w, r, existing.IdentityID)
+		if !ok {
 			return
 		}
-		hash, err := auth.HashPassword(password)
-		if err != nil {
-			handleError(w, err)
-			return
-		}
-		if err := s.store.SetPassword(r.Context(), existing.IdentityID, hash); err != nil {
-			handleError(w, err)
-			return
-		}
-		if err := s.cfg.Notifier.SendPassword(r.Context(), phone, password, channel); err != nil {
-			handleError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"message": "Senha enviada com sucesso."})
+		s.deliverPassword(w, r, d, name, password)
 		return
 	}
 
-	identity, err := s.store.FindIdentityByPhone(r.Context(), phone)
+	identity, err := s.findIdentityForGrant(r.Context(), d)
 	if err == nil {
 		if _, err := s.store.AttachMembership(r.Context(), identity.ID, tenantID, role, professionalID, customerID); err != nil {
 			handleError(w, err)
@@ -547,15 +621,76 @@ func (s *server) grantAccess(w http.ResponseWriter, r *http.Request, tenantID, r
 		handleError(w, err)
 		return
 	}
-	if _, err := s.store.CreateIdentityWithMembership(r.Context(), name, "", phone, hash, "", "", tenantID, role, professionalID, customerID); err != nil {
+	if _, err := s.store.CreateIdentityWithMembership(r.Context(), name, d.Email, d.Phone, hash, "", "", tenantID, role, professionalID, customerID); err != nil {
 		handleError(w, err)
 		return
 	}
-	if err := s.cfg.Notifier.SendPassword(r.Context(), phone, password, channel); err != nil {
-		handleError(w, err)
-		return
+	s.deliverPassword(w, r, d, name, password)
+}
+
+// findIdentityForGrant looks the person up by e-mail first, then by phone.
+func (s *server) findIdentityForGrant(ctx context.Context, d accessDelivery) (domain.Identity, error) {
+	if d.Email != "" {
+		identity, err := s.store.FindIdentityByEmail(ctx, d.Email)
+		if !errors.Is(err, domain.ErrNotFound) {
+			return identity, err
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Senha enviada com sucesso."})
+	if d.Phone != "" {
+		return s.store.FindIdentityByPhone(ctx, d.Phone)
+	}
+	return domain.Identity{}, domain.ErrNotFound
+}
+
+// newPassword generates a temporary password for identityID and stores it.
+func (s *server) newPassword(w http.ResponseWriter, r *http.Request, identityID string) (string, bool) {
+	password, err := auth.GenerateTempPassword()
+	if err != nil {
+		handleError(w, err)
+		return "", false
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		handleError(w, err)
+		return "", false
+	}
+	if err := s.store.SetPassword(r.Context(), identityID, hash); err != nil {
+		handleError(w, err)
+		return "", false
+	}
+	return password, true
+}
+
+// deliverPassword sends (or, for "manual", returns to the manager) the
+// temporary password. The manual response also says which login to use.
+func (s *server) deliverPassword(w http.ResponseWriter, r *http.Request, d accessDelivery, name, password string) {
+	switch d.Channel {
+	case channelManual:
+		login := d.Phone
+		if login == "" {
+			login = d.Email
+		}
+		writeJSON(w, http.StatusOK, map[string]string{
+			"message":   "Senha gerada. Informe ao profissional junto com o endereço de acesso.",
+			"password":  password,
+			"login":     login,
+			"login_url": d.LoginURL,
+		})
+		return
+	case channelEmail:
+		if err := s.cfg.Mailer.SendPasswordEmail(r.Context(), d.Email, name, password, d.LoginURL); err != nil {
+			handleError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"message": "Senha enviada para " + d.Email + "."})
+		return
+	default:
+		if err := s.cfg.Notifier.SendPassword(r.Context(), d.Phone, password, d.Channel); err != nil {
+			handleError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"message": "Senha enviada com sucesso."})
+	}
 }
 
 func (s *server) findExistingMembership(ctx context.Context, professionalID, customerID string) (domain.User, error) {
@@ -611,6 +746,43 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := s.store.GetMembershipByID(r.Context(), claims.UserID)
 	respond(w, user, err)
+}
+
+// changePassword lets anyone logged in replace their password — typically the
+// 6-digit temporary one a manager handed over. The password belongs to the
+// identity, so it changes in every barbershop the person uses.
+func (s *server) changePassword(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if len(body.NewPassword) < 8 {
+		writeError(w, http.StatusBadRequest, "validation_error", "a nova senha deve ter ao menos 8 caracteres")
+		return
+	}
+	claims, _ := claimsFromContext(r)
+	user, err := s.store.GetMembershipByID(r.Context(), claims.UserID)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	if !auth.CheckPassword(user.PasswordHash, body.CurrentPassword) {
+		writeError(w, http.StatusBadRequest, "invalid_password", "senha atual incorreta")
+		return
+	}
+	hash, err := auth.HashPassword(body.NewPassword)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	if err := s.store.SetPassword(r.Context(), user.IdentityID, hash); err != nil {
+		handleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Senha alterada."})
 }
 
 func (s *server) listTenantsAdmin(w http.ResponseWriter, r *http.Request) {
@@ -745,6 +917,10 @@ func (s *server) updateTenant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation_error", "slug deve conter apenas letras minúsculas, números e hífen")
 		return
 	}
+	if domain.IsReservedSlug(body.Slug) {
+		writeError(w, http.StatusBadRequest, "validation_error", "este slug é reservado pelo sistema, escolha outro")
+		return
+	}
 	if body.CancellationWindowHours < 0 {
 		writeError(w, http.StatusBadRequest, "validation_error", "prazo de cancelamento não pode ser negativo")
 		return
@@ -757,6 +933,89 @@ func (s *server) updateTenant(w http.ResponseWriter, r *http.Request) {
 	}
 	claims, _ := claimsFromContext(r)
 	tenant, err := s.store.UpdateTenant(r.Context(), claims.TenantID, body.Name, body.Slug, body.SelfSchedulingEnabled, body.AutoConfirmAppointments, body.CancellationWindowHours, body.Timezone)
+	respond(w, tenant, err)
+}
+
+// publicTenant brands the login page at http://domain/<slug>. Anyone can
+// call it, so it exposes only the name, slug, palette and logo, and hides
+// inactive barbershops behind the same 404 as unknown slugs.
+func (s *server) publicTenant(w http.ResponseWriter, r *http.Request) {
+	tenant, err := s.store.GetTenantBySlug(r.Context(), r.PathValue("slug"))
+	if err == nil && !tenant.Active {
+		err = domain.ErrNotFound
+	}
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, domain.PublicTenant{Name: tenant.Name, Slug: tenant.Slug, ColorScheme: tenant.ColorScheme, LogoURL: tenant.LogoURL()})
+}
+
+// publicTenantLogo serves the stored image bytes. The URL is versioned
+// (?v=), so it can be cached for a year; nosniff and a deny-all CSP make
+// sure the bytes are only ever treated as an image.
+func (s *server) publicTenantLogo(w http.ResponseWriter, r *http.Request) {
+	contentType, data, err := s.store.GetTenantLogo(r.Context(), r.PathValue("slug"))
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func (s *server) updateTenantBranding(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ColorScheme string `json:"color_scheme"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if !domain.ValidColorScheme(body.ColorScheme) {
+		writeError(w, http.StatusBadRequest, "validation_error", "esquema de cores inválido")
+		return
+	}
+	claims, _ := claimsFromContext(r)
+	tenant, err := s.store.UpdateTenantBranding(r.Context(), claims.TenantID, body.ColorScheme)
+	respond(w, tenant, err)
+}
+
+// uploadTenantLogo takes the raw image as the request body. The type is
+// decided by sniffing the bytes, never by the Content-Type the client sent,
+// so a renamed SVG/HTML file can't be stored as a "PNG".
+func (s *server) uploadTenantLogo(w http.ResponseWriter, r *http.Request) {
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, domain.MaxLogoBytes))
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "validation_error", "a logo deve ter no máximo 1 MB")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "validation_error", "não foi possível ler a imagem enviada")
+		return
+	}
+	if len(data) == 0 {
+		writeError(w, http.StatusBadRequest, "validation_error", "envie uma imagem")
+		return
+	}
+	contentType := http.DetectContentType(data)
+	if !slices.Contains(domain.LogoContentTypes, contentType) {
+		writeError(w, http.StatusBadRequest, "validation_error", "formato inválido: envie PNG, JPG ou WebP")
+		return
+	}
+	claims, _ := claimsFromContext(r)
+	tenant, err := s.store.SetTenantLogo(r.Context(), claims.TenantID, contentType, data)
+	respond(w, tenant, err)
+}
+
+func (s *server) deleteTenantLogo(w http.ResponseWriter, r *http.Request) {
+	claims, _ := claimsFromContext(r)
+	tenant, err := s.store.DeleteTenantLogo(r.Context(), claims.TenantID)
 	respond(w, tenant, err)
 }
 

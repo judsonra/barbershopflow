@@ -3,8 +3,11 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { api, ApiError } from './api'
 import { downloadICS, googleCalendarUrl } from './calendar'
+import { applyTheme, forgetSessionTheme, rememberSessionTheme, rememberSlugTheme, tenantSlugFromPath } from './branding'
+import { BrandingConfig } from './BrandingConfig'
+import { ProfessionalAccess } from './ProfessionalAccess'
 import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
-import type { AdminCustomerMatch, Appointment, Customer, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, Service, Tenant, TimeOff, User } from './types'
+import type { PublicTenant, AdminCustomerMatch, Appointment, Customer, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, Service, Tenant, TimeOff, User } from './types'
 
 export function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : 'Erro inesperado'
@@ -26,20 +29,46 @@ export default function App() {
   const [checkingSession, setCheckingSession] = useState(true)
   const [oauthError, setOauthError] = useState('')
   const [initialChoice, setInitialChoice] = useState<{ preauthToken: string; memberships: MembershipOption[] } | null>(null)
+  // http://domain/<slug> opens that barbershop's branded login page.
+  const [slug] = useState(() => tenantSlugFromPath(window.location.pathname))
+  const [branding, setBranding] = useState<PublicTenant | null>(null)
+  const [loadingBranding, setLoadingBranding] = useState(Boolean(slug))
 
   useEffect(() => {
-    api.onSessionExpired(() => setUser(null))
+    if (!slug) return
+    api.publicTenant(slug)
+      .then(setBranding)
+      .catch(() => {
+        window.history.replaceState(null, '', '/')
+        setOauthError('Barbearia não encontrada. Confira o endereço ou entre pela tela padrão.')
+      })
+      .finally(() => setLoadingBranding(false))
+  }, [slug])
+
+  // Logged out, the page wears the brand of the /<slug> being visited (or
+  // the default). Logged in, AgendaApp/AdminPanel apply their own theme.
+  // Waits for the session check and the /<slug> lookup: resetting to the
+  // default while they're in flight would undo the theme main.tsx restored.
+  useEffect(() => {
+    if (user || checkingSession || loadingBranding) return
+    applyTheme(branding?.color_scheme)
+    if (branding) rememberSlugTheme(branding.slug, branding.color_scheme)
+  }, [user, checkingSession, loadingBranding, branding])
+
+  useEffect(() => {
+    api.onSessionExpired(() => { forgetSessionTheme(); setUser(null) })
     const { error, choice } = api.consumeOAuthRedirect()
     if (error) setOauthError(error)
     if (choice) setInitialChoice(choice)
     if (!api.isAuthenticated()) { setCheckingSession(false); return }
-    api.me().then(setUser).catch(() => api.logout()).finally(() => setCheckingSession(false))
+    api.me().then(setUser).catch(() => { api.logout(); forgetSessionTheme() }).finally(() => setCheckingSession(false))
   }, [])
 
-  if (checkingSession) return <div className="empty">Carregando…</div>
-  if (!user) return <Login onLogin={setUser} initialError={oauthError} initialChoice={initialChoice} />
-  if (user.role === 'superadmin') return <AdminPanel user={user} onImpersonate={setUser} onLogout={() => { api.logout(); setUser(null) }} />
-  return <AgendaApp user={user} onLogout={() => { api.logout(); setUser(null) }} />
+  if (checkingSession || loadingBranding) return <div className="empty">Carregando…</div>
+  if (!user) return <Login onLogin={setUser} initialError={oauthError} initialChoice={initialChoice} branding={branding} />
+  const logout = () => { api.logout(); forgetSessionTheme(); setUser(null) }
+  if (user.role === 'superadmin') return <AdminPanel user={user} onImpersonate={setUser} onLogout={logout} />
+  return <AgendaApp user={user} onLogout={logout} />
 }
 
 // A superadmin doesn't operate inside any single tenant — it only lists
@@ -51,6 +80,7 @@ export function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onIm
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [tenantQuery, setTenantQuery] = useState('')
   const [customerQuery, setCustomerQuery] = useState('')
   const [customerResults, setCustomerResults] = useState<AdminCustomerMatch[]>([])
   const [searching, setSearching] = useState(false)
@@ -65,6 +95,17 @@ export function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onIm
   }, [])
 
   useEffect(() => { void load() }, [load])
+  // The superadmin isn't inside any barbershop, so always the default look.
+  useEffect(() => { applyTheme(null); rememberSessionTheme(null) }, [])
+
+  // The admin list already comes back whole, so filtering is local and
+  // instant: by name or slug, ignoring case and accents ("joao" finds "João").
+  const filteredTenants = useMemo(() => {
+    const normalize = (value: string) => value.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    const query = normalize(tenantQuery.trim())
+    if (!query) return tenants
+    return tenants.filter(t => normalize(t.name).includes(query) || normalize(t.slug).includes(query))
+  }, [tenants, tenantQuery])
 
   // Search-as-you-type, same 400ms debounce as the tenant-name check on
   // signup — an empty query just clears the results instead of round-tripping.
@@ -95,7 +136,7 @@ export function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onIm
     catch (err) { setError(errorMessage(err)) }
   }
 
-  return <div className="app-shell">
+  return <div className="app-shell wide">
     <header>
       <div><span className="eyebrow">SUPERADMIN</span><h1>{view === 'customers' ? 'Clientes' : view === 'audit' ? 'Auditoria' : 'Barbearias'}</h1></div>
       <button className="avatar" title={`${user.name} · Perfil`} onClick={() => setView('profile')}>{user.name.slice(0, 2).toUpperCase()}</button>
@@ -106,11 +147,19 @@ export function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onIm
       {view === 'tenants' && <>
         {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
         {loading ? <div className="empty">Carregando…</div> :
-          tenants.length === 0 ? <div className="empty"><span>🏠</span><h2>Nenhuma barbearia</h2></div> :
-          <ul className="tenant-list">{tenants.map(t => <li key={t.id}>
+          tenants.length === 0 ? <div className="empty"><span>🏠</span><h2>Nenhuma barbearia</h2></div> : <>
+          <div className="list-search">
+            <label>Pesquisar barbearia
+              <input type="search" value={tenantQuery} onChange={e => setTenantQuery(e.target.value)} placeholder="Nome ou identificador…" />
+            </label>
+            <small aria-live="polite">{tenantQuery.trim() ? `${filteredTenants.length} de ${tenants.length}` : `${tenants.length}`} barbearia(s)</small>
+          </div>
+          {filteredTenants.length === 0 ? <div className="empty"><span>🔎</span><h2>Nenhuma barbearia encontrada</h2><p>Confira o nome ou limpe a pesquisa.</p></div> :
+          <ul className="tenant-list">{filteredTenants.map(t => <li key={t.id}>
             <div><b>{t.name}</b><small>{t.slug}{!t.active ? ' · inativa' : ''}</small></div>
             <button onClick={() => void access(t.id)}>Acessar como gestor</button>
           </li>)}</ul>}
+        </>}
       </>}
 
       {view === 'customers' && <>
@@ -156,9 +205,50 @@ export function Profile({ user, onLogout, onBack }: { user: User; onLogout: () =
       {user.phone && <div><small>Celular</small><b>{user.phone}</b></div>}
       <div><small>Status</small><b>{user.active ? 'Ativo' : 'Inativo'}</b></div>
     </div>
+    <ChangePassword />
     <button className="primary danger" onClick={onLogout}>Sair</button>
     <button type="button" className="link-button" onClick={onBack}>Voltar</button>
   </section>
+}
+
+// Anyone logged in can replace their password here — typically the 6-digit
+// temporary one the manager handed over. It changes in every barbershop the
+// person uses, since the password belongs to the identity.
+export function ChangePassword() {
+  const [open, setOpen] = useState(false)
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [info, setInfo] = useState('')
+
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setError(''); setInfo('')
+    if (next.length < 8) { setError('A nova senha deve ter pelo menos 8 caracteres.'); return }
+    if (next !== confirm) { setError('A confirmação não confere com a nova senha.'); return }
+    setSaving(true)
+    try {
+      setInfo((await api.changePassword(current, next)).message)
+      setCurrent(''); setNext(''); setConfirm(''); setOpen(false)
+    }
+    catch (err) { setError(errorMessage(err)) }
+    finally { setSaving(false) }
+  }
+
+  return <div className="change-password">
+    {info && <p role="status">{info}</p>}
+    {!open ? <button type="button" className="link-button" onClick={() => { setOpen(true); setInfo('') }}>Alterar senha</button>
+      : <form onSubmit={submit} className="quick">
+          <h3>Alterar senha</h3>
+          {error && <div className="alert" role="alert">{error}</div>}
+          <label>Senha atual<input type="password" required autoComplete="current-password" value={current} onChange={e => setCurrent(e.target.value)} /></label>
+          <label>Nova senha<input type="password" required minLength={8} autoComplete="new-password" value={next} onChange={e => setNext(e.target.value)} /></label>
+          <label>Confirme a nova senha<input type="password" required autoComplete="new-password" value={confirm} onChange={e => setConfirm(e.target.value)} /></label>
+          <button className="primary" disabled={saving}>{saving ? 'Salvando…' : 'Salvar nova senha'}</button>
+          <button type="button" onClick={() => { setOpen(false); setError('') }}>Cancelar</button>
+        </form>}
+  </div>
 }
 
 type LoginMode = 'email' | 'phone' | 'recover' | 'signup' | 'choose-tenant'
@@ -168,11 +258,15 @@ export function slugify(value: string) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
-export function Login({ onLogin, initialError, initialChoice }: {
+// With `branding` (opened at http://domain/<slug>) the login wears that
+// barbershop's logo, name and colors, starts on the client phone login and
+// hides "Cadastrar minha barbearia" — it's that shop's page, not BarberFlow's.
+export function Login({ onLogin, initialError, initialChoice, branding }: {
   onLogin: (user: User) => void; initialError?: string
   initialChoice?: { preauthToken: string; memberships: MembershipOption[] } | null
+  branding?: PublicTenant | null
 }) {
-  const [mode, setMode] = useState<LoginMode>(initialChoice ? 'choose-tenant' : 'email')
+  const [mode, setMode] = useState<LoginMode>(initialChoice ? 'choose-tenant' : branding ? 'phone' : 'email')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
@@ -195,14 +289,20 @@ export function Login({ onLogin, initialError, initialChoice }: {
     return () => clearTimeout(timeout)
   }, [signup.tenantName])
 
-  function handleLoginResult(result: Awaited<ReturnType<typeof api.login>>) {
-    if (result.kind === 'choice') { setChoice(result); setMode('choose-tenant'); return }
+  async function handleLoginResult(result: Awaited<ReturnType<typeof api.login>>) {
+    if (result.kind === 'choice') {
+      // On a barbershop's own page, someone with access to several shops
+      // means this one — no need to ask.
+      const here = branding && result.memberships.find(m => m.tenant_slug === branding.slug)
+      if (here) { onLogin(await api.selectMembership(result.preauthToken, here.membership_id)); return }
+      setChoice(result); setMode('choose-tenant'); return
+    }
     onLogin(result.user)
   }
 
   async function submitEmail(event: FormEvent) {
     event.preventDefault(); setLoading(true); setError('')
-    try { handleLoginResult(await api.login(email, password)) }
+    try { await handleLoginResult(await api.login(email, password)) }
     catch (err) { setError(errorMessage(err)) }
     finally { setLoading(false) }
   }
@@ -229,7 +329,7 @@ export function Login({ onLogin, initialError, initialChoice }: {
 
   async function submitPhone(event: FormEvent) {
     event.preventDefault(); setLoading(true); setError('')
-    try { handleLoginResult(await api.loginByPhone(toE164BR(phone), password)) }
+    try { await handleLoginResult(await api.loginByPhone(toE164BR(phone), password)) }
     catch (err) {
       if (err instanceof ApiError && err.code === 'account_locked') { setMode('recover'); setError('') }
       else setError(errorMessage(err))
@@ -254,7 +354,12 @@ export function Login({ onLogin, initialError, initialChoice }: {
 
   return <div className="app-shell">
     <header>
-      <div><span className="eyebrow">BARBERFLOW</span><h1>Entrar</h1></div>
+      {branding
+        ? <div className="brand-title">
+            {branding.logo_url && <img className="brand-logo" src={branding.logo_url} alt={`Logo da ${branding.name}`} />}
+            <div><span className="eyebrow">ENTRAR</span><h1>{branding.name}</h1></div>
+          </div>
+        : <div><span className="eyebrow">BARBERFLOW</span><h1>Entrar</h1></div>}
     </header>
     <main>
       <section className="form-page">
@@ -284,11 +389,11 @@ export function Login({ onLogin, initialError, initialChoice }: {
             <button className="primary" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
           </form>
           <div className="social-login">
-            <a className="social-button" href={api.socialLoginUrl('google')}>Entrar com Google</a>
-            <a className="social-button" href={api.socialLoginUrl('facebook')}>Entrar com Facebook</a>
+            <a className="social-button" href={api.socialLoginUrl('google', branding?.slug)}>Entrar com Google</a>
+            <a className="social-button" href={api.socialLoginUrl('facebook', branding?.slug)}>Entrar com Facebook</a>
           </div>
-          <button type="button" className="link-button" onClick={() => { setMode('phone'); setError('') }}>Sou cliente e entro com celular</button>
-          <button type="button" className="link-button" onClick={() => { setMode('signup'); setError('') }}>Cadastrar minha barbearia</button>
+          <button type="button" className="link-button" onClick={() => { setMode('phone'); setError('') }}>Entrar com celular (clientes e profissionais)</button>
+          {!branding && <button type="button" className="link-button" onClick={() => { setMode('signup'); setError('') }}>Cadastrar minha barbearia</button>}
         </>}
 
         {mode === 'signup' && <>
@@ -350,7 +455,7 @@ export function Login({ onLogin, initialError, initialChoice }: {
 export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   const isClient = user.role === 'client'
   const [tab, setTab] = useState<'agenda' | 'new' | 'config' | 'hours' | 'profile'>('agenda')
-  const [configView, setConfigView] = useState<'menu' | 'agenda' | 'tenant' | 'services' | 'professionals' | 'clients' | 'reports'>('menu')
+  const [configView, setConfigView] = useState<'menu' | 'agenda' | 'tenant' | 'branding' | 'services' | 'professionals' | 'clients' | 'reports'>('menu')
   const [offset, setOffset] = useState(0)
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [services, setServices] = useState<Service[]>([])
@@ -368,7 +473,9 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
     setLoading(true); setError('')
     try {
       const [agenda, serviceList, professionalList, tenantInfo, customerList] = await Promise.all([
-        api.appointments(bounds.from, bounds.to), api.services(), api.professionals(), api.tenant(),
+        // /tenant is set as soon as it answers (it carries the theme), not
+        // after the heavier agenda and lists.
+        api.appointments(bounds.from, bounds.to), api.services(), api.professionals(), api.tenant().then(t => { setTenant(t); return t }),
         isClient ? Promise.resolve([]) : api.customers()
       ])
       setAppointments(agenda); setServices(serviceList); setProfessionals(professionalList)
@@ -378,6 +485,13 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
   }, [bounds, isClient])
 
   useEffect(() => { void load() }, [load])
+  // Everyone inside a barbershop (manager, professional, client) sees its
+  // brand, whichever URL they came in through.
+  useEffect(() => {
+    if (!tenant) return
+    applyTheme(tenant.color_scheme)
+    rememberSessionTheme(tenant.color_scheme)
+  }, [tenant])
 
   async function changeStatus(item: Appointment, status: Appointment['status']) {
     try { await api.updateStatus(item.id, status); await load() }
@@ -390,9 +504,12 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
     (!filterService || item.service_id === filterService)
   ), [appointments, filterProfessional, filterStatus, filterService])
 
-  return <div className="app-shell">
+  return <div className="app-shell wide">
     <header>
-      <div><span className="eyebrow">BARBERFLOW</span><h1>Sua agenda</h1></div>
+      <div className="brand-title">
+        {tenant?.logo_url && <img className="brand-logo" src={tenant.logo_url} alt={`Logo da ${tenant.name}`} />}
+        <div><span className="eyebrow">{tenant ? tenant.name.toUpperCase() : 'BARBERFLOW'}</span><h1>Sua agenda</h1></div>
+      </div>
       <button className="avatar" title={`${user.name} · Perfil`} onClick={() => setTab('profile')}>{user.name.slice(0, 2).toUpperCase()}</button>
     </header>
 
@@ -454,6 +571,7 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
         {configView === 'menu' && <ConfigMenu onSelect={setConfigView} />}
         {configView === 'agenda' && <TenantConfig tenant={tenant} onSaved={t => setTenant(t)} onBack={() => setConfigView('menu')} />}
         {configView === 'tenant' && <TenantAccount tenant={tenant} onSaved={t => setTenant(t)} onBack={() => setConfigView('menu')} />}
+        {configView === 'branding' && <BrandingConfig tenant={tenant} onSaved={t => setTenant(t)} onBack={() => setConfigView('menu')} />}
         {configView === 'services' && <ServicesManager services={services} onCreated={s => setServices(v => [...v, s])}
           onUpdated={s => setServices(v => v.map(x => x.id === s.id ? s : x))} onBack={() => setConfigView('menu')} />}
         {configView === 'professionals' && <ProfessionalsManager professionals={professionals} services={services} onCreated={p => setProfessionals(v => [...v, p])}
@@ -481,10 +599,11 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
   </div>
 }
 
-export function ConfigMenu({ onSelect }: { onSelect: (view: 'agenda' | 'tenant' | 'services' | 'professionals' | 'clients' | 'reports') => void }) {
+export function ConfigMenu({ onSelect }: { onSelect: (view: 'agenda' | 'tenant' | 'branding' | 'services' | 'professionals' | 'clients' | 'reports') => void }) {
   return <section className="form-page"><span className="eyebrow">CONFIGURAÇÕES</span><h2>Config</h2>
     <ul className="tenant-list">
       <li role="button" tabIndex={0} onClick={() => onSelect('tenant')}><div><b>Barbearia</b><small>Nome, slug e dados da conta</small></div></li>
+      <li role="button" tabIndex={0} onClick={() => onSelect('branding')}><div><b>Identidade visual</b><small>Cores e logo da sua página</small></div></li>
       <li role="button" tabIndex={0} onClick={() => onSelect('agenda')}><div><b>Agenda</b><small>Autoagendamento e confirmação</small></div></li>
       <li role="button" tabIndex={0} onClick={() => onSelect('services')}><div><b>Serviços</b><small>Cadastro de serviços</small></div></li>
       <li role="button" tabIndex={0} onClick={() => onSelect('professionals')}><div><b>Profissionais</b><small>Cadastro de profissionais</small></div></li>
@@ -639,7 +758,9 @@ export function TenantAccount({ tenant, onSaved, onBack }: { tenant: Tenant; onS
         </span>
         {nameStatus === 'taken' && <small className="field-error">Nome já em uso</small>}
       </label>
-      <label>Slug (usado em links de cadastro)<input required value={slug} onChange={e => setSlug(e.target.value.toLowerCase())} /></label>
+      <label>Slug (endereço da sua página e links de cadastro)<input required value={slug} onChange={e => setSlug(e.target.value.toLowerCase())} />
+        <small>Sua página fica em {window.location.origin}/{slug || '…'}. Trocar o slug muda esse endereço, e o link antigo deixa de funcionar.</small>
+      </label>
       <label>Fuso horário
         <select value={timezone} onChange={e => setTimezone(e.target.value)}>
           {!brazilTimezones.some(zone => zone.value === tenant.timezone) && <option value={tenant.timezone}>{tenant.timezone}</option>}
@@ -786,9 +907,6 @@ export function ProfessionalsManager({ professionals, services, onCreated, onUpd
   const [editSaving, setEditSaving] = useState(false)
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [granting, setGranting] = useState(false)
-  const [grantPhone, setGrantPhone] = useState('')
-  const [grantMessage, setGrantMessage] = useState('')
-  const [grantSaving, setGrantSaving] = useState(false)
   const [commissionsOpen, setCommissionsOpen] = useState(false)
   const [specialtiesOpen, setSpecialtiesOpen] = useState(false)
   const [specialtiesLoading, setSpecialtiesLoading] = useState(false)
@@ -909,20 +1027,7 @@ export function ProfessionalsManager({ professionals, services, onCreated, onUpd
     finally { setTogglingId(null) }
   }
 
-  function startGrant(professional: Professional) {
-    setGranting(true)
-    setGrantPhone(professional.phone ? fromE164BR(professional.phone) : '')
-    setGrantMessage(''); setError('')
-  }
-
-  async function submitGrant(event: FormEvent) {
-    event.preventDefault()
-    if (screen.name !== 'detail') return
-    setError(''); setGrantMessage(''); setGrantSaving(true)
-    try { setGrantMessage((await api.grantProfessionalAccess(screen.id, toE164BR(grantPhone))).message) }
-    catch (err) { setError(errorMessage(err)) }
-    finally { setGrantSaving(false) }
-  }
+  function startGrant() { setGranting(true); setError('') }
 
   const detailProfessional = screen.name === 'detail' ? professionals.find(p => p.id === screen.id) : undefined
 
@@ -948,18 +1053,12 @@ export function ProfessionalsManager({ professionals, services, onCreated, onUpd
         <button type="button" disabled={togglingId === detailProfessional.id} onClick={() => toggleActive(detailProfessional)}>
           {togglingId === detailProfessional.id ? 'Salvando…' : detailProfessional.active ? 'Excluir' : 'Reativar'}
         </button>
-        <button type="button" onClick={() => startGrant(detailProfessional)}>Conceder acesso</button>
+        <button type="button" onClick={startGrant}>Conceder acesso</button>
         <button type="button" onClick={() => setCommissionsOpen(v => !v)}>Comissão</button>
         <button type="button" onClick={() => startSpecialties(detailProfessional)}>Especialidades e preços</button>
       </div>
       {commissionsOpen && <CommissionsManager key={detailProfessional.id} id={detailProfessional.id} services={services} onClose={() => setCommissionsOpen(false)} />}
-      {granting && <form onSubmit={submitGrant} className="quick">
-        <p>Enviar senha de acesso ao app para <b>{detailProfessional.name}</b> por SMS/WhatsApp:</p>
-        {grantMessage && <p>{grantMessage}</p>}
-        <input type="tel" placeholder="(11) 99999-0000" required value={grantPhone} onChange={e => setGrantPhone(maskPhone(e.target.value))} maxLength={16} />
-        <button disabled={grantSaving}>{grantSaving ? 'Enviando…' : 'Enviar senha'}</button>
-        <button type="button" onClick={() => setGranting(false)}>Fechar</button>
-      </form>}
+      {granting && <ProfessionalAccess key={detailProfessional.id} professional={detailProfessional} onClose={() => setGranting(false)} />}
       {specialtiesOpen && <form onSubmit={submitSpecialties} className="quick">
         <p>Serviços que <b>{detailProfessional.name}</b> pode realizar. Sem nenhum marcado, executa qualquer serviço ativo com preço/duração padrão.</p>
         {specialtiesError && <div className="alert">{specialtiesError}</div>}

@@ -53,6 +53,22 @@ forma 2 têm duas respostas possíveis:
   (forma 2), o caso ambíguo redireciona com
   `#preauth_token=...&needs_selection=1` em vez de `access_token`.
 
+`POST /professionals/{id}/credentials` aceita
+`{"channel","phone","email"}`. `channel`:
+
+- `whatsapp` (padrão) ou `sms`: envia pela Zenvia; exige celular.
+- `email`: envia a senha e o link da página da barbearia (`FRONTEND_URL/<slug>`)
+  por SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
+  `SMTP_FROM`; vazio = só log); exige e-mail. Se a pessoa já tinha acesso
+  só por celular, ganha também o login por e-mail.
+- `manual`: **não envia nada** e responde
+  `{"message","password","login","login_url"}` para o gestor repassar
+  pessoalmente; exige celular ou e-mail.
+
+`phone`/`email` informados atualizam o cadastro do profissional. Uma
+identidade nova recebe os dois logins (celular e e-mail) quando existirem.
+Canal desconhecido ou e-mail inválido → `400`.
+
 Concessão de acesso (`POST /customers/{id}/credentials` e
 `POST /professionals/{id}/credentials`) segue a mesma lógica: se o celular
 informado já é uma identidade conhecida (staff/cliente de outra barbearia),
@@ -68,9 +84,12 @@ senha quando a identidade é realmente nova.
 | POST | `/auth/refresh` | Troca um refresh token válido por um novo access token | pública |
 | POST | `/auth/recover` | Envia senha nova por SMS/WhatsApp a um celular cadastrado (vale em todas as barbearias da identidade) | pública |
 | POST | `/auth/select-membership` | Completa o login quando a identidade tem mais de um vínculo ativo | pública |
+| GET | `/public/tenants/{slug}` | Marca da barbearia para a página `/<slug>`: `{name, slug, color_scheme, logo_url}` (404 se inexistente ou inativa) | pública |
+| GET | `/public/tenants/{slug}/logo` | Imagem da logo (cache de 1 ano, URL versionada por `?v=`) | pública |
 | GET | `/auth/google/start`, `/auth/facebook/start` | Redireciona ao provedor OAuth | pública |
 | GET | `/auth/google/callback`, `/auth/facebook/callback` | Callback OAuth; redireciona ao frontend com tokens | pública |
 | GET | `/auth/me` | Retorna o usuário autenticado | qualquer papel |
+| POST | `/auth/password` | Troca a própria senha (`{"current_password","new_password"}`, nova com 8+ caracteres; senha atual errada → `400 invalid_password`) | qualquer papel |
 | GET | `/services` | Lista serviços | qualquer papel |
 | POST | `/services` | Cria serviço | `manager` |
 | PATCH | `/services/{id}` | Atualiza nome/duração/preço/ativo (usado também para desativar/reativar) | `manager` |
@@ -84,13 +103,16 @@ senha quando a identidade é realmente nova.
 | DELETE | `/professionals/{id}/time-off/{blockId}` | Remove um bloqueio | `manager` ou o próprio `professional` |
 | GET | `/professionals/{id}/services` | Especialidades do profissional (serviços habilitados + overrides) | qualquer papel |
 | PUT | `/professionals/{id}/services` | Substitui o conjunto de especialidades inteiro | `manager` |
-| POST | `/professionals/{id}/credentials` | Concede/renova acesso por celular a um profissional | `manager` |
+| POST | `/professionals/{id}/credentials` | Concede/renova acesso de um profissional (WhatsApp, SMS, e-mail ou senha mostrada ao gestor) | `manager` |
 | GET | `/customers?page=&limit=` | Lista clientes, paginado (opcional) | `manager` ou `professional` |
 | POST | `/customers` | Cria cliente | `manager` ou `professional` |
 | PATCH | `/customers/{id}` | Atualiza dados/ativo do cliente (usado também para desativar/reativar) | `manager` ou `professional` |
 | POST | `/customers/{id}/credentials` | Concede/renova acesso por celular a um cliente | `manager` ou `professional` |
 | GET | `/tenant` | Configurações da própria barbearia | qualquer papel |
 | PATCH | `/tenant` | Liga/desliga autoagendamento, auto-confirmação e prazo de cancelamento | `manager` |
+| PATCH | `/tenant/branding` | Troca a paleta de cores (`{"color_scheme"}`) | `manager` |
+| PUT | `/tenant/logo` | Envia/substitui a logo (corpo = bytes da imagem) | `manager` |
+| DELETE | `/tenant/logo` | Remove a logo | `manager` |
 | GET | `/tenant/holidays` | Lista feriados da barbearia | qualquer papel |
 | POST | `/tenant/holidays` | Cadastra um feriado (bloqueia a data para todos os profissionais) | `manager` |
 | DELETE | `/tenant/holidays/{id}` | Remove um feriado | `manager` |
@@ -289,6 +311,34 @@ compartilhado com o slug antigo.
 formato, CPF pelos dígitos verificadores (`400 validation_error` se
 inválido). CPF pode ser enviado formatado (`111.444.777-35`) ou só dígitos —
 o servidor normaliza antes de salvar.
+
+## Identidade visual (white label)
+
+Cada barbearia tem uma página própria em `http://<domínio>/<slug>`: a SPA lê
+o primeiro segmento do caminho, chama `GET /public/tenants/{slug}` e abre o
+login com a logo, o nome e as cores da barbearia. Slug inexistente ou de
+barbearia inativa responde `404` e o app volta para a tela padrão.
+
+O `Tenant` (`GET /tenant`, `PATCH /tenant`, etc.) passa a trazer
+`color_scheme` e, quando há logo, `logo_url`.
+
+- `PATCH /tenant/branding` — `{"color_scheme": "vinho"}`. Ids aceitos:
+  `classico` (padrão), `marinho`, `vinho`, `floresta`, `grafite`,
+  `terracota`, `oceano`, `lavanda`; outro valor → `400 validation_error`. As
+  cores de cada paleta ficam no frontend (`src/branding.ts`).
+- `PUT /tenant/logo` — corpo com os bytes da imagem (não JSON). O tipo é
+  detectado pelo conteúdo, não pelo `Content-Type` enviado: só PNG, JPEG ou
+  WebP (`400` para qualquer outro, inclusive SVG); acima de 1 MB → `413`.
+  Responde o `Tenant` com `logo_url` novo.
+- `DELETE /tenant/logo` — remove a logo (idempotente).
+- `GET /public/tenants/{slug}/logo?v=<versão>` — serve a imagem com
+  `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src
+  'none'` e `Cache-Control: public, max-age=31536000, immutable`. A versão
+  muda a cada envio, então o cache longo nunca mostra logo antiga.
+
+Slugs reservados (`api`, `health`, `assets`, `admin`, `login`, `static`,
+`app`, `www`) são recusados com `400` em `POST /tenants` e `PATCH /tenant`,
+porque esses caminhos pertencem ao próprio app.
 
 ## Política de cancelamento e no-show
 
