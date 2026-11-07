@@ -140,6 +140,22 @@ func (r *Repository) UpdateProfessionalPhone(ctx context.Context, tenantID, prof
 	return nil
 }
 
+// UpdateProfessionalEmail fills in/corrects the e-mail when the manager
+// grants access by e-mail. Same per-barbershop uniqueness as the register.
+func (r *Repository) UpdateProfessionalEmail(ctx context.Context, tenantID, professionalID, email string) error {
+	tag, err := r.db.Exec(ctx, `UPDATE professionals SET email=$3 WHERE id=$1 AND tenant_id=$2`, professionalID, tenantID, email)
+	if _, ok := isUniqueViolation(err); ok {
+		return domain.ErrConflict
+	}
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 func (r *Repository) GetProfessionalSchedule(ctx context.Context, tenantID, professionalID string) ([]domain.ScheduleEntry, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT weekday, start_minute, end_minute FROM professional_schedules
@@ -846,6 +862,16 @@ func (r *Repository) LinkFacebookID(ctx context.Context, identityID, facebookID 
 // enrolled in at once — there's only ever one password to begin with.
 func (r *Repository) SetPassword(ctx context.Context, identityID, passwordHash string) error {
 	_, err := r.db.Exec(ctx, `UPDATE identities SET password_hash=$2, failed_login_attempts=0, locked_at=NULL WHERE id=$1`, identityID, passwordHash)
+	return err
+}
+
+// SetIdentityEmail adds an e-mail login to an identity that only had a
+// phone (granting access by e-mail to someone who already had access).
+func (r *Repository) SetIdentityEmail(ctx context.Context, identityID, email string) error {
+	_, err := r.db.Exec(ctx, `UPDATE identities SET email=$2 WHERE id=$1`, identityID, email)
+	if _, ok := isUniqueViolation(err); ok {
+		return domain.ErrConflict
+	}
 	return err
 }
 

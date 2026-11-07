@@ -37,3 +37,6 @@ export type Report = {
   revenue: { total_cents: number; by_professional: ProfessionalRevenue[] }
   retention: { total_customers: number; returning_customers: number; rate: number }
 }
+export type AccessChannel = 'whatsapp' | 'sms' | 'email' | 'manual'
+// password/login/login_url only come back for the 'manual' channel.
+export type AccessGrant = { message: string; password?: string; login?: string; login_url?: string }

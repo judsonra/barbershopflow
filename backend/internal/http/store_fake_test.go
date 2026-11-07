@@ -710,6 +710,43 @@ func (s *fakeStore) UpdateTenant(_ context.Context, tenantID, name, slug string,
 	return t, nil
 }
 
+func (s *fakeStore) SetIdentityEmail(_ context.Context, identityID, email string) error {
+	if err := s.err("SetIdentityEmail"); err != nil {
+		return err
+	}
+	for id, other := range s.identities {
+		if id != identityID && strings.EqualFold(other.Email, email) {
+			return domain.ErrConflict
+		}
+	}
+	identity, ok := s.identities[identityID]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	identity.Email = email
+	s.identities[identityID] = identity
+	for id, m := range s.memberships {
+		if m.IdentityID == identityID {
+			m.Email = email
+			s.memberships[id] = m
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) UpdateProfessionalEmail(_ context.Context, tenantID, professionalID, email string) error {
+	if err := s.err("UpdateProfessionalEmail"); err != nil {
+		return err
+	}
+	p, ok := s.professionals[tenantID][professionalID]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	p.Email = email
+	s.professionals[tenantID][professionalID] = p
+	return nil
+}
+
 type fakeLogo struct {
 	contentType string
 	data        []byte

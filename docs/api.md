@@ -53,6 +53,22 @@ forma 2 têm duas respostas possíveis:
   (forma 2), o caso ambíguo redireciona com
   `#preauth_token=...&needs_selection=1` em vez de `access_token`.
 
+`POST /professionals/{id}/credentials` aceita
+`{"channel","phone","email"}`. `channel`:
+
+- `whatsapp` (padrão) ou `sms`: envia pela Zenvia; exige celular.
+- `email`: envia a senha e o link da página da barbearia (`FRONTEND_URL/<slug>`)
+  por SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
+  `SMTP_FROM`; vazio = só log); exige e-mail. Se a pessoa já tinha acesso
+  só por celular, ganha também o login por e-mail.
+- `manual`: **não envia nada** e responde
+  `{"message","password","login","login_url"}` para o gestor repassar
+  pessoalmente; exige celular ou e-mail.
+
+`phone`/`email` informados atualizam o cadastro do profissional. Uma
+identidade nova recebe os dois logins (celular e e-mail) quando existirem.
+Canal desconhecido ou e-mail inválido → `400`.
+
 Concessão de acesso (`POST /customers/{id}/credentials` e
 `POST /professionals/{id}/credentials`) segue a mesma lógica: se o celular
 informado já é uma identidade conhecida (staff/cliente de outra barbearia),
@@ -73,6 +89,7 @@ senha quando a identidade é realmente nova.
 | GET | `/auth/google/start`, `/auth/facebook/start` | Redireciona ao provedor OAuth | pública |
 | GET | `/auth/google/callback`, `/auth/facebook/callback` | Callback OAuth; redireciona ao frontend com tokens | pública |
 | GET | `/auth/me` | Retorna o usuário autenticado | qualquer papel |
+| POST | `/auth/password` | Troca a própria senha (`{"current_password","new_password"}`, nova com 8+ caracteres; senha atual errada → `400 invalid_password`) | qualquer papel |
 | GET | `/services` | Lista serviços | qualquer papel |
 | POST | `/services` | Cria serviço | `manager` |
 | PATCH | `/services/{id}` | Atualiza nome/duração/preço/ativo (usado também para desativar/reativar) | `manager` |
@@ -86,7 +103,7 @@ senha quando a identidade é realmente nova.
 | DELETE | `/professionals/{id}/time-off/{blockId}` | Remove um bloqueio | `manager` ou o próprio `professional` |
 | GET | `/professionals/{id}/services` | Especialidades do profissional (serviços habilitados + overrides) | qualquer papel |
 | PUT | `/professionals/{id}/services` | Substitui o conjunto de especialidades inteiro | `manager` |
-| POST | `/professionals/{id}/credentials` | Concede/renova acesso por celular a um profissional | `manager` |
+| POST | `/professionals/{id}/credentials` | Concede/renova acesso de um profissional (WhatsApp, SMS, e-mail ou senha mostrada ao gestor) | `manager` |
 | GET | `/customers?page=&limit=` | Lista clientes, paginado (opcional) | `manager` ou `professional` |
 | POST | `/customers` | Cria cliente | `manager` ou `professional` |
 | PATCH | `/customers/{id}` | Atualiza dados/ativo do cliente (usado também para desativar/reativar) | `manager` ou `professional` |

@@ -13,11 +13,15 @@
   Pode sugerir o próprio horário se a barbearia habilitar o autoagendamento —
   ver seção própria abaixo.
 - **Profissional:** barbeiro disponível para receber agendamentos. Autentica
-  com papel `professional`, por login social (Google/Facebook) se tiver
-  e-mail cadastrado, ou por celular + senha temporária se não tiver — o
-  gestor concede esse acesso pela primeira vez (ou renova) em
-  `POST /api/v1/professionals/{id}/credentials`, senha enviada por
-  SMS/WhatsApp, mesmo mecanismo usado para cliente. Só enxerga a própria
+  com papel `professional`, por celular + senha, por e-mail + senha ou por
+  login social (Google/Facebook) se tiver e-mail cadastrado. O gestor
+  concede esse acesso pela primeira vez (ou renova) em
+  `POST /api/v1/professionals/{id}/credentials`, escolhendo como a senha
+  temporária (6 dígitos) chega ao profissional: WhatsApp ou SMS (Zenvia),
+  e-mail (SMTP) ou **gerada na tela para o gestor informar pessoalmente**
+  (nada é enviado — o caminho que funciona sem Zenvia nem SMTP). O
+  profissional (como qualquer usuário) troca a senha em Perfil > Alterar
+  senha; a senha é da pessoa, então muda em todas as barbearias. Só enxerga a própria
   agenda (`GET /api/v1/appointments` filtra por `professional_id`), só pode
   alterar o status de agendamentos onde é o profissional responsável; também
   pode cadastrar clientes e conceder acesso por celular a eles.

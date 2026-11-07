@@ -22,10 +22,10 @@ Para ver e copiar o seu endereço:
 3. Em **Link da sua página**, toque em **Copiar** e envie para seus clientes
    (WhatsApp, Instagram, cartão de visita).
 
-Quem abre esse endereço vê a tela de entrada com a sua marca. O login do
-cliente por celular aparece primeiro. A equipe entra em **Sou da equipe e entro
-com e-mail**. A opção de cadastrar uma barbearia nova não aparece na sua
-página.
+Quem abre esse endereço vê a tela de entrada com a sua marca. O login por
+celular (de clientes e profissionais) aparece primeiro. Quem usa e-mail toca em
+**Entrar com e-mail**. A opção de cadastrar uma barbearia nova não aparece na
+sua página.
 
 ## Escolher as cores
 
