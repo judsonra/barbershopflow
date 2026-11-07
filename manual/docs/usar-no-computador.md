@@ -25,6 +25,8 @@ da janela.
   confortável, sem esticar até a borda da tela.
 - **Botão +:** o botão redondo de novo cadastro fica no canto inferior direito
   da janela.
+- **Cabeçalho:** mostra a logo e o nome da barbearia, com as cores escolhidas
+  em [Identidade visual](barbearia/identidade-visual.md).
 - **Barra de rolagem:** a página sempre mostra a barra de rolagem à direita,
   para indicar que há mais conteúdo abaixo.
 

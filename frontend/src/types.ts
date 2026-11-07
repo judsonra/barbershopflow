@@ -6,7 +6,10 @@ export type MembershipOption = { membership_id: string; tenant_id: string; tenan
 export type Tenant = {
   id: string; name: string; slug: string
   self_scheduling_enabled: boolean; auto_confirm_appointments: boolean; cancellation_window_hours: number; timezone: string; active: boolean; created_at: string
+  color_scheme?: string; logo_url?: string
 }
+// What anyone can see about a barbershop at http://domain/<slug>.
+export type PublicTenant = { name: string; slug: string; color_scheme: string; logo_url?: string }
 export type Service = { id: string; name: string; duration_minutes: number; price_cents: number; active: boolean }
 export type Professional = { id: string; name: string; phone?: string; email?: string; cpf?: string; active: boolean }
 export type ScheduleEntry = { weekday: number; start_minute: number; end_minute: number }

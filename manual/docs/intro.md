@@ -13,4 +13,5 @@ muda. Por enquanto, você encontra aqui:
 
 - [Usar no computador](usar-no-computador.md)
 - [Pesquisar barbearias (administrador geral)](pesquisar-barbearias.md)
+- [Personalizar a identidade visual](barbearia/identidade-visual.md)
 - [Definir o fuso horário da barbearia](barbearia/fuso-horario.md)

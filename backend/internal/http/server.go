@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -65,6 +67,10 @@ type Store interface {
 	GetFirstManagerByTenant(ctx context.Context, tenantID string) (domain.User, error)
 	GetTenantByID(ctx context.Context, id string) (domain.Tenant, error)
 	UpdateTenant(ctx context.Context, tenantID, name, slug string, selfSchedulingEnabled, autoConfirmAppointments bool, cancellationWindowHours int, timezone string) (domain.Tenant, error)
+	UpdateTenantBranding(ctx context.Context, tenantID, colorScheme string) (domain.Tenant, error)
+	SetTenantLogo(ctx context.Context, tenantID, contentType string, data []byte) (domain.Tenant, error)
+	DeleteTenantLogo(ctx context.Context, tenantID string) (domain.Tenant, error)
+	GetTenantLogo(ctx context.Context, slug string) (string, []byte, error)
 	ListHolidays(ctx context.Context, tenantID string) ([]domain.Holiday, error)
 	CreateHoliday(ctx context.Context, tenantID string, item domain.Holiday) (domain.Holiday, error)
 	DeleteHoliday(ctx context.Context, tenantID, id string) error
@@ -113,6 +119,8 @@ func New(store Store, cfg Config) http.Handler {
 	public.HandleFunc("GET /api/v1/auth/google/callback", s.oauthCallback(s.cfg.Google, "google"))
 	public.HandleFunc("GET /api/v1/auth/facebook/start", s.oauthStart(s.cfg.Facebook))
 	public.HandleFunc("GET /api/v1/auth/facebook/callback", s.oauthCallback(s.cfg.Facebook, "facebook"))
+	public.HandleFunc("GET /api/v1/public/tenants/{slug}", s.publicTenant)
+	public.HandleFunc("GET /api/v1/public/tenants/{slug}/logo", s.publicTenantLogo)
 
 	protected := http.NewServeMux()
 	protected.HandleFunc("GET /api/v1/auth/me", s.me)
@@ -123,6 +131,9 @@ func New(store Store, cfg Config) http.Handler {
 	protected.HandleFunc("GET /api/v1/admin/audit", s.requireRole(domain.RoleSuperAdmin, s.adminListAudit))
 	protected.HandleFunc("GET /api/v1/tenant", s.getTenant)
 	protected.HandleFunc("PATCH /api/v1/tenant", s.requireRole(domain.RoleManager, s.updateTenant))
+	protected.HandleFunc("PATCH /api/v1/tenant/branding", s.requireRole(domain.RoleManager, s.updateTenantBranding))
+	protected.HandleFunc("PUT /api/v1/tenant/logo", s.requireRole(domain.RoleManager, s.uploadTenantLogo))
+	protected.HandleFunc("DELETE /api/v1/tenant/logo", s.requireRole(domain.RoleManager, s.deleteTenantLogo))
 	protected.HandleFunc("GET /api/v1/tenant/holidays", s.listHolidays)
 	protected.HandleFunc("POST /api/v1/tenant/holidays", s.requireRole(domain.RoleManager, s.createHoliday))
 	protected.HandleFunc("DELETE /api/v1/tenant/holidays/{id}", s.requireRole(domain.RoleManager, s.deleteHoliday))
@@ -199,6 +210,10 @@ func (s *server) createTenant(w http.ResponseWriter, r *http.Request) {
 	}
 	if !slugPattern.MatchString(body.Slug) {
 		writeError(w, http.StatusBadRequest, "validation_error", "slug deve conter apenas letras minúsculas, números e hífen")
+		return
+	}
+	if domain.IsReservedSlug(body.Slug) {
+		writeError(w, http.StatusBadRequest, "validation_error", "este slug é reservado pelo sistema, escolha outro")
 		return
 	}
 	if len(body.Password) < 8 {
@@ -739,6 +754,10 @@ func (s *server) updateTenant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation_error", "slug deve conter apenas letras minúsculas, números e hífen")
 		return
 	}
+	if domain.IsReservedSlug(body.Slug) {
+		writeError(w, http.StatusBadRequest, "validation_error", "este slug é reservado pelo sistema, escolha outro")
+		return
+	}
 	if body.CancellationWindowHours < 0 {
 		writeError(w, http.StatusBadRequest, "validation_error", "prazo de cancelamento não pode ser negativo")
 		return
@@ -751,6 +770,89 @@ func (s *server) updateTenant(w http.ResponseWriter, r *http.Request) {
 	}
 	claims, _ := claimsFromContext(r)
 	tenant, err := s.store.UpdateTenant(r.Context(), claims.TenantID, body.Name, body.Slug, body.SelfSchedulingEnabled, body.AutoConfirmAppointments, body.CancellationWindowHours, body.Timezone)
+	respond(w, tenant, err)
+}
+
+// publicTenant brands the login page at http://domain/<slug>. Anyone can
+// call it, so it exposes only the name, slug, palette and logo, and hides
+// inactive barbershops behind the same 404 as unknown slugs.
+func (s *server) publicTenant(w http.ResponseWriter, r *http.Request) {
+	tenant, err := s.store.GetTenantBySlug(r.Context(), r.PathValue("slug"))
+	if err == nil && !tenant.Active {
+		err = domain.ErrNotFound
+	}
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, domain.PublicTenant{Name: tenant.Name, Slug: tenant.Slug, ColorScheme: tenant.ColorScheme, LogoURL: tenant.LogoURL()})
+}
+
+// publicTenantLogo serves the stored image bytes. The URL is versioned
+// (?v=), so it can be cached for a year; nosniff and a deny-all CSP make
+// sure the bytes are only ever treated as an image.
+func (s *server) publicTenantLogo(w http.ResponseWriter, r *http.Request) {
+	contentType, data, err := s.store.GetTenantLogo(r.Context(), r.PathValue("slug"))
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func (s *server) updateTenantBranding(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ColorScheme string `json:"color_scheme"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if !domain.ValidColorScheme(body.ColorScheme) {
+		writeError(w, http.StatusBadRequest, "validation_error", "esquema de cores inválido")
+		return
+	}
+	claims, _ := claimsFromContext(r)
+	tenant, err := s.store.UpdateTenantBranding(r.Context(), claims.TenantID, body.ColorScheme)
+	respond(w, tenant, err)
+}
+
+// uploadTenantLogo takes the raw image as the request body. The type is
+// decided by sniffing the bytes, never by the Content-Type the client sent,
+// so a renamed SVG/HTML file can't be stored as a "PNG".
+func (s *server) uploadTenantLogo(w http.ResponseWriter, r *http.Request) {
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, domain.MaxLogoBytes))
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "validation_error", "a logo deve ter no máximo 1 MB")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "validation_error", "não foi possível ler a imagem enviada")
+		return
+	}
+	if len(data) == 0 {
+		writeError(w, http.StatusBadRequest, "validation_error", "envie uma imagem")
+		return
+	}
+	contentType := http.DetectContentType(data)
+	if !slices.Contains(domain.LogoContentTypes, contentType) {
+		writeError(w, http.StatusBadRequest, "validation_error", "formato inválido: envie PNG, JPG ou WebP")
+		return
+	}
+	claims, _ := claimsFromContext(r)
+	tenant, err := s.store.SetTenantLogo(r.Context(), claims.TenantID, contentType, data)
+	respond(w, tenant, err)
+}
+
+func (s *server) deleteTenantLogo(w http.ResponseWriter, r *http.Request) {
+	claims, _ := claimsFromContext(r)
+	tenant, err := s.store.DeleteTenantLogo(r.Context(), claims.TenantID)
 	respond(w, tenant, err)
 }
 
