@@ -94,7 +94,7 @@ export function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onIm
     catch (err) { setError(errorMessage(err)) }
   }
 
-  return <div className="app-shell">
+  return <div className="app-shell wide">
     <header>
       <div><span className="eyebrow">SUPERADMIN</span><h1>{view === 'customers' ? 'Clientes' : view === 'audit' ? 'Auditoria' : 'Barbearias'}</h1></div>
       <button className="avatar" title={`${user.name} · Perfil`} onClick={() => setView('profile')}>{user.name.slice(0, 2).toUpperCase()}</button>
@@ -389,7 +389,7 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
     (!filterService || item.service_id === filterService)
   ), [appointments, filterProfessional, filterStatus, filterService])
 
-  return <div className="app-shell">
+  return <div className="app-shell wide">
     <header>
       <div><span className="eyebrow">BARBERFLOW</span><h1>Sua agenda</h1></div>
       <button className="avatar" title={`${user.name} · Perfil`} onClick={() => setTab('profile')}>{user.name.slice(0, 2).toUpperCase()}</button>

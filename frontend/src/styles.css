@@ -66,3 +66,24 @@ details { border: 1px dashed #c8bda9; border-radius: 11px; padding: 11px; }summa
 .tenant-list button { border: 0; border-radius: 8px; padding: 9px 12px; background: #e9dfcf; font-size: 12px; white-space: nowrap; }
 .tenant-list li[role="button"] { cursor: pointer; }
 @media (min-width: 700px) { body { padding: 24px 0; }.app-shell { min-height: calc(100dvh - 48px); border-radius: 24px; overflow: hidden; } }
+/* Desktop (>= 1024px): telas com navegação (superadmin e agenda) deixam de ser
+   uma coluna de celular e passam a ocupar a largura toda, com o menu virando
+   barra lateral fixa e as listas em grade. Abaixo disso nada muda. */
+@media (min-width: 1024px) {
+  html { overflow-y: scroll; scrollbar-gutter: stable; scrollbar-width: auto; scrollbar-color: #b68034 #e8e5df; }
+  body:has(.app-shell.wide) { padding: 0; }
+  .app-shell.wide { max-width: none; min-height: 100dvh; margin: 0; border-radius: 0; overflow: visible; padding-bottom: 0; box-shadow: none; }
+  .app-shell.wide:has(> nav) { display: grid; grid-template-columns: 232px minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .app-shell.wide > header, .app-shell.wide > main { grid-column: 2; }
+  .app-shell.wide > header { padding: 26px 40px; position: sticky; top: 0; z-index: 3; }
+  .app-shell.wide > main { padding: 28px 40px 48px; width: 100%; max-width: 1600px; }
+  .app-shell.wide > nav { grid-column: 1; grid-row: 1 / span 2; position: sticky; top: 0; align-self: start; height: 100dvh; width: auto; flex-direction: column; justify-content: flex-start; gap: 6px; padding: 104px 14px 24px; }
+  .app-shell.wide > nav button { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 11px 14px; border-radius: 10px; font-size: 15px; text-align: left; }
+  .app-shell.wide > nav button span { font-size: 20px; width: 26px; text-align: center; }
+  .app-shell.wide > nav button:hover { background: #1f2937; color: #e5e7eb; }
+  .app-shell.wide > nav button.active { background: #1f2937; color: #d6a85f; }
+  .app-shell.wide .tenant-list { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
+  .app-shell.wide .appointments { grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); align-items: start; }
+  .app-shell.wide .form-page, .app-shell.wide > main > label { max-width: 820px; }
+  .app-shell.wide .fab { position: fixed; right: 40px; bottom: 40px; }
+}
