@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -22,16 +23,84 @@ var (
 )
 
 type Tenant struct {
-	ID                      string    `json:"id"`
-	Name                    string    `json:"name"`
-	Slug                    string    `json:"slug"`
-	SelfSchedulingEnabled   bool      `json:"self_scheduling_enabled"`
-	AutoConfirmAppointments bool      `json:"auto_confirm_appointments"`
-	CancellationWindowHours int       `json:"cancellation_window_hours"`
-	Timezone                string    `json:"timezone"`
-	Active                  bool      `json:"active"`
-	CreatedAt               time.Time `json:"created_at"`
+	ID                      string     `json:"id"`
+	Name                    string     `json:"name"`
+	Slug                    string     `json:"slug"`
+	SelfSchedulingEnabled   bool       `json:"self_scheduling_enabled"`
+	AutoConfirmAppointments bool       `json:"auto_confirm_appointments"`
+	CancellationWindowHours int        `json:"cancellation_window_hours"`
+	Timezone                string     `json:"timezone"`
+	ColorScheme             string     `json:"color_scheme"`
+	LogoUpdatedAt           *time.Time `json:"-"`
+	Active                  bool       `json:"active"`
+	CreatedAt               time.Time  `json:"created_at"`
 }
+
+// LogoURL is the public address of the barbershop's logo, or "" when it has
+// none. The ?v= version changes on every upload, so the long-lived cache on
+// the logo response never serves a stale image.
+func (t Tenant) LogoURL() string {
+	if t.LogoUpdatedAt == nil {
+		return ""
+	}
+	return fmt.Sprintf("/api/v1/public/tenants/%s/logo?v=%d", t.Slug, t.LogoUpdatedAt.Unix())
+}
+
+// MarshalJSON adds the derived logo_url to every tenant payload, so each
+// handler returning a Tenant doesn't have to remember to fill it in.
+func (t Tenant) MarshalJSON() ([]byte, error) {
+	type plain Tenant
+	return json.Marshal(struct {
+		plain
+		LogoURL string `json:"logo_url,omitempty"`
+	}{plain(t), t.LogoURL()})
+}
+
+// PublicTenant is what anyone can see about a barbershop by its slug: just
+// enough to brand its login page, nothing about how it operates.
+type PublicTenant struct {
+	Name        string `json:"name"`
+	Slug        string `json:"slug"`
+	ColorScheme string `json:"color_scheme"`
+	LogoURL     string `json:"logo_url,omitempty"`
+}
+
+// DefaultColorScheme matches the tenants.color_scheme column default and is
+// the original BarberFlow look (dark navy and gold).
+const DefaultColorScheme = "classico"
+
+// ColorSchemes is the closed list of palettes a manager can pick in
+// Config > Identidade visual. The actual colors live in the frontend
+// (src/branding.ts); the backend only guards the ids.
+var ColorSchemes = []string{DefaultColorScheme, "marinho", "vinho", "floresta", "grafite", "terracota", "oceano", "lavanda"}
+
+func ValidColorScheme(id string) bool {
+	for _, item := range ColorSchemes {
+		if item == id {
+			return true
+		}
+	}
+	return false
+}
+
+// ReservedSlugs can't be used by a barbershop because http://domain/<slug>
+// is its branded page, and these paths belong to the app itself.
+var ReservedSlugs = []string{"api", "health", "assets", "admin", "login", "static", "app", "www"}
+
+func IsReservedSlug(slug string) bool {
+	for _, item := range ReservedSlugs {
+		if item == slug {
+			return true
+		}
+	}
+	return false
+}
+
+// Logo upload limits: standard raster formats only (SVG can carry scripts),
+// at most 1 MB.
+const MaxLogoBytes = 1 << 20
+
+var LogoContentTypes = []string{"image/png", "image/jpeg", "image/webp"}
 
 // DefaultTimezone matches the tenants.timezone column default.
 const DefaultTimezone = "America/Sao_Paulo"
@@ -346,7 +415,7 @@ type ProfessionalOccupancy struct {
 // an average of each professional's individual rate, so periods differ in
 // weight by how much capacity each professional actually has.
 type OccupancyReport struct {
-	OverallRate    float64                  `json:"overall_rate"`
+	OverallRate    float64                 `json:"overall_rate"`
 	ByProfessional []ProfessionalOccupancy `json:"by_professional"`
 }
 
@@ -359,7 +428,7 @@ type ProfessionalRevenue struct {
 // RevenueReport counts only StatusCompleted appointments - revenue that
 // was actually realized, not merely scheduled/confirmed.
 type RevenueReport struct {
-	TotalCents     int64                  `json:"total_cents"`
+	TotalCents     int64                 `json:"total_cents"`
 	ByProfessional []ProfessionalRevenue `json:"by_professional"`
 }
 

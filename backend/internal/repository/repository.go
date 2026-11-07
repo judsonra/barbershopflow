@@ -1017,10 +1017,84 @@ func (r *Repository) CreateIdentityWithMembership(ctx context.Context, name, ema
 	return r.GetMembershipByID(ctx, membershipID)
 }
 
-const tenantColumns = `id, name, slug, self_scheduling_enabled, auto_confirm_appointments, cancellation_window_hours, timezone, active, created_at`
+const tenantColumns = `id, name, slug, self_scheduling_enabled, auto_confirm_appointments, cancellation_window_hours, timezone, color_scheme, logo_updated_at, active, created_at`
 
 func scanTenant(item *domain.Tenant) []any {
-	return []any{&item.ID, &item.Name, &item.Slug, &item.SelfSchedulingEnabled, &item.AutoConfirmAppointments, &item.CancellationWindowHours, &item.Timezone, &item.Active, &item.CreatedAt}
+	return []any{&item.ID, &item.Name, &item.Slug, &item.SelfSchedulingEnabled, &item.AutoConfirmAppointments, &item.CancellationWindowHours, &item.Timezone, &item.ColorScheme, &item.LogoUpdatedAt, &item.Active, &item.CreatedAt}
+}
+
+// UpdateTenantBranding changes only the color palette; the id was already
+// checked against domain.ColorSchemes by the handler.
+func (r *Repository) UpdateTenantBranding(ctx context.Context, tenantID, colorScheme string) (domain.Tenant, error) {
+	var item domain.Tenant
+	err := r.db.QueryRow(ctx, `UPDATE tenants SET color_scheme=$2 WHERE id=$1 RETURNING `+tenantColumns, tenantID, colorScheme).Scan(scanTenant(&item)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return item, domain.ErrNotFound
+	}
+	return item, err
+}
+
+// SetTenantLogo replaces the logo and bumps tenants.logo_updated_at in the
+// same transaction, so the versioned logo URL never points at old bytes.
+func (r *Repository) SetTenantLogo(ctx context.Context, tenantID, contentType string, data []byte) (domain.Tenant, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.Tenant{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var item domain.Tenant
+	err = tx.QueryRow(ctx, `UPDATE tenants SET logo_updated_at=now() WHERE id=$1 RETURNING `+tenantColumns, tenantID).Scan(scanTenant(&item)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return item, domain.ErrNotFound
+	}
+	if err != nil {
+		return item, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO tenant_logos(tenant_id, content_type, data, updated_at) VALUES($1,$2,$3,$4)
+		ON CONFLICT (tenant_id) DO UPDATE SET content_type=EXCLUDED.content_type, data=EXCLUDED.data, updated_at=EXCLUDED.updated_at`,
+		tenantID, contentType, data, item.LogoUpdatedAt); err != nil {
+		return item, err
+	}
+	return item, tx.Commit(ctx)
+}
+
+// DeleteTenantLogo is idempotent: removing a logo that isn't there just
+// returns the tenant as it is.
+func (r *Repository) DeleteTenantLogo(ctx context.Context, tenantID string) (domain.Tenant, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.Tenant{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `DELETE FROM tenant_logos WHERE tenant_id=$1`, tenantID); err != nil {
+		return domain.Tenant{}, err
+	}
+	var item domain.Tenant
+	err = tx.QueryRow(ctx, `UPDATE tenants SET logo_updated_at=NULL WHERE id=$1 RETURNING `+tenantColumns, tenantID).Scan(scanTenant(&item)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return item, domain.ErrNotFound
+	}
+	if err != nil {
+		return item, err
+	}
+	return item, tx.Commit(ctx)
+}
+
+// GetTenantLogo serves the public logo by slug, only for active barbershops
+// — same visibility rule as the public branding endpoint.
+func (r *Repository) GetTenantLogo(ctx context.Context, slug string) (string, []byte, error) {
+	var contentType string
+	var data []byte
+	err := r.db.QueryRow(ctx, `
+		SELECT l.content_type, l.data FROM tenant_logos l JOIN tenants t ON t.id = l.tenant_id
+		WHERE t.slug=$1 AND t.active`, slug).Scan(&contentType, &data)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, domain.ErrNotFound
+	}
+	return contentType, data, err
 }
 
 // ListTenants is superadmin-only: every other query in this file is

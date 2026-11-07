@@ -21,7 +21,7 @@ vi.mock('./api', () => {
       createTenant: vi.fn(),
       recoverPhone: vi.fn(),
       selectMembership: vi.fn(),
-      socialLoginUrl: (provider: string) => `/api/v1/auth/${provider}/start`,
+      socialLoginUrl: (provider: string, slug?: string) => `/api/v1/auth/${provider}/start${slug ? `?tenant=${slug}` : ''}`,
     },
   }
 })
@@ -166,5 +166,48 @@ describe('Login - signup mode', () => {
     expect(mockedApi.createTenant).toHaveBeenCalledWith(expect.objectContaining({
       tenant_name: 'Barbearia Nova', manager_name: 'Fulano', email: 'fulano@x.com', password: 's3cret123',
     }))
+  })
+})
+
+describe('Login - página da barbearia (/<slug>)', () => {
+  const branding = { name: 'Junin Barber Shop', slug: 'junin', color_scheme: 'vinho', logo_url: '/api/v1/public/tenants/junin/logo?v=1' }
+
+  it('mostra logo e nome, começa no login do cliente e esconde o cadastro de barbearia', async () => {
+    render(<Login onLogin={vi.fn()} branding={branding} />)
+
+    expect(screen.getByRole('heading', { name: 'Junin Barber Shop' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Logo da Junin Barber Shop' })).toHaveAttribute('src', branding.logo_url)
+    expect(screen.getByLabelText('Celular')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sou da equipe e entro com e-mail' }))
+    expect(screen.queryByRole('button', { name: 'Cadastrar minha barbearia' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Entrar com Google' })).toHaveAttribute('href', '/api/v1/auth/google/start?tenant=junin')
+  })
+
+  it('sem marca continua com o login padrão', () => {
+    render(<Login onLogin={vi.fn()} />)
+    expect(screen.getByRole('heading', { name: 'Entrar' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cadastrar minha barbearia' })).toBeInTheDocument()
+  })
+
+  it('com acesso a várias barbearias, entra direto na da página', async () => {
+    const user = { ...baseUser, role: 'client' as const }
+    mockedApi.login.mockResolvedValue({
+      kind: 'choice', preauthToken: 'pre', memberships: [
+        { membership_id: 'm-outra', tenant_id: 't2', tenant_name: 'Outra', tenant_slug: 'outra', role: 'client' },
+        { membership_id: 'm-junin', tenant_id: 't1', tenant_name: 'Junin Barber Shop', tenant_slug: 'junin', role: 'client' },
+      ],
+    })
+    mockedApi.selectMembership.mockResolvedValue(user)
+    const onLogin = vi.fn()
+    render(<Login onLogin={onLogin} branding={branding} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sou da equipe e entro com e-mail' }))
+    await userEvent.type(screen.getByLabelText('E-mail'), 'cli@x.com')
+    await userEvent.type(screen.getByLabelText('Senha'), 's3cret123')
+    await userEvent.click(screen.getByRole('button', { name: 'Entrar' }))
+
+    await waitFor(() => expect(onLogin).toHaveBeenCalledWith(user))
+    expect(mockedApi.selectMembership).toHaveBeenCalledWith('pre', 'm-junin')
   })
 })

@@ -2,8 +2,10 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { api, ApiError } from './api'
 import { downloadICS, googleCalendarUrl } from './calendar'
+import { applyTheme, tenantSlugFromPath } from './branding'
+import { BrandingConfig } from './BrandingConfig'
 import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
-import type { AdminCustomerMatch, Appointment, Customer, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, Service, Tenant, TimeOff, User } from './types'
+import type { PublicTenant, AdminCustomerMatch, Appointment, Customer, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, Service, Tenant, TimeOff, User } from './types'
 
 export function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : 'Erro inesperado'
@@ -25,6 +27,25 @@ export default function App() {
   const [checkingSession, setCheckingSession] = useState(true)
   const [oauthError, setOauthError] = useState('')
   const [initialChoice, setInitialChoice] = useState<{ preauthToken: string; memberships: MembershipOption[] } | null>(null)
+  // http://domain/<slug> opens that barbershop's branded login page.
+  const [slug] = useState(() => tenantSlugFromPath(window.location.pathname))
+  const [branding, setBranding] = useState<PublicTenant | null>(null)
+  const [loadingBranding, setLoadingBranding] = useState(Boolean(slug))
+
+  useEffect(() => {
+    if (!slug) return
+    api.publicTenant(slug)
+      .then(setBranding)
+      .catch(() => {
+        window.history.replaceState(null, '', '/')
+        setOauthError('Barbearia não encontrada. Confira o endereço ou entre pela tela padrão.')
+      })
+      .finally(() => setLoadingBranding(false))
+  }, [slug])
+
+  // Logged out, the page wears the brand of the /<slug> being visited (or
+  // the default). Logged in, AgendaApp/AdminPanel apply their own theme.
+  useEffect(() => { if (!user) applyTheme(branding?.color_scheme) }, [user, branding])
 
   useEffect(() => {
     api.onSessionExpired(() => setUser(null))
@@ -35,8 +56,8 @@ export default function App() {
     api.me().then(setUser).catch(() => api.logout()).finally(() => setCheckingSession(false))
   }, [])
 
-  if (checkingSession) return <div className="empty">Carregando…</div>
-  if (!user) return <Login onLogin={setUser} initialError={oauthError} initialChoice={initialChoice} />
+  if (checkingSession || loadingBranding) return <div className="empty">Carregando…</div>
+  if (!user) return <Login onLogin={setUser} initialError={oauthError} initialChoice={initialChoice} branding={branding} />
   if (user.role === 'superadmin') return <AdminPanel user={user} onImpersonate={setUser} onLogout={() => { api.logout(); setUser(null) }} />
   return <AgendaApp user={user} onLogout={() => { api.logout(); setUser(null) }} />
 }
@@ -65,6 +86,8 @@ export function AdminPanel({ user, onImpersonate, onLogout }: { user: User; onIm
   }, [])
 
   useEffect(() => { void load() }, [load])
+  // The superadmin isn't inside any barbershop, so always the default look.
+  useEffect(() => { applyTheme(null) }, [])
 
   // The admin list already comes back whole, so filtering is local and
   // instant: by name or slug, ignoring case and accents ("joao" finds "João").
@@ -185,11 +208,15 @@ export function slugify(value: string) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
-export function Login({ onLogin, initialError, initialChoice }: {
+// With `branding` (opened at http://domain/<slug>) the login wears that
+// barbershop's logo, name and colors, starts on the client phone login and
+// hides "Cadastrar minha barbearia" — it's that shop's page, not BarberFlow's.
+export function Login({ onLogin, initialError, initialChoice, branding }: {
   onLogin: (user: User) => void; initialError?: string
   initialChoice?: { preauthToken: string; memberships: MembershipOption[] } | null
+  branding?: PublicTenant | null
 }) {
-  const [mode, setMode] = useState<LoginMode>(initialChoice ? 'choose-tenant' : 'email')
+  const [mode, setMode] = useState<LoginMode>(initialChoice ? 'choose-tenant' : branding ? 'phone' : 'email')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
@@ -212,14 +239,20 @@ export function Login({ onLogin, initialError, initialChoice }: {
     return () => clearTimeout(timeout)
   }, [signup.tenantName])
 
-  function handleLoginResult(result: Awaited<ReturnType<typeof api.login>>) {
-    if (result.kind === 'choice') { setChoice(result); setMode('choose-tenant'); return }
+  async function handleLoginResult(result: Awaited<ReturnType<typeof api.login>>) {
+    if (result.kind === 'choice') {
+      // On a barbershop's own page, someone with access to several shops
+      // means this one — no need to ask.
+      const here = branding && result.memberships.find(m => m.tenant_slug === branding.slug)
+      if (here) { onLogin(await api.selectMembership(result.preauthToken, here.membership_id)); return }
+      setChoice(result); setMode('choose-tenant'); return
+    }
     onLogin(result.user)
   }
 
   async function submitEmail(event: FormEvent) {
     event.preventDefault(); setLoading(true); setError('')
-    try { handleLoginResult(await api.login(email, password)) }
+    try { await handleLoginResult(await api.login(email, password)) }
     catch (err) { setError(errorMessage(err)) }
     finally { setLoading(false) }
   }
@@ -246,7 +279,7 @@ export function Login({ onLogin, initialError, initialChoice }: {
 
   async function submitPhone(event: FormEvent) {
     event.preventDefault(); setLoading(true); setError('')
-    try { handleLoginResult(await api.loginByPhone(toE164BR(phone), password)) }
+    try { await handleLoginResult(await api.loginByPhone(toE164BR(phone), password)) }
     catch (err) {
       if (err instanceof ApiError && err.code === 'account_locked') { setMode('recover'); setError('') }
       else setError(errorMessage(err))
@@ -271,7 +304,12 @@ export function Login({ onLogin, initialError, initialChoice }: {
 
   return <div className="app-shell">
     <header>
-      <div><span className="eyebrow">BARBERFLOW</span><h1>Entrar</h1></div>
+      {branding
+        ? <div className="brand-title">
+            {branding.logo_url && <img className="brand-logo" src={branding.logo_url} alt={`Logo da ${branding.name}`} />}
+            <div><span className="eyebrow">ENTRAR</span><h1>{branding.name}</h1></div>
+          </div>
+        : <div><span className="eyebrow">BARBERFLOW</span><h1>Entrar</h1></div>}
     </header>
     <main>
       <section className="form-page">
@@ -301,11 +339,11 @@ export function Login({ onLogin, initialError, initialChoice }: {
             <button className="primary" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
           </form>
           <div className="social-login">
-            <a className="social-button" href={api.socialLoginUrl('google')}>Entrar com Google</a>
-            <a className="social-button" href={api.socialLoginUrl('facebook')}>Entrar com Facebook</a>
+            <a className="social-button" href={api.socialLoginUrl('google', branding?.slug)}>Entrar com Google</a>
+            <a className="social-button" href={api.socialLoginUrl('facebook', branding?.slug)}>Entrar com Facebook</a>
           </div>
           <button type="button" className="link-button" onClick={() => { setMode('phone'); setError('') }}>Sou cliente e entro com celular</button>
-          <button type="button" className="link-button" onClick={() => { setMode('signup'); setError('') }}>Cadastrar minha barbearia</button>
+          {!branding && <button type="button" className="link-button" onClick={() => { setMode('signup'); setError('') }}>Cadastrar minha barbearia</button>}
         </>}
 
         {mode === 'signup' && <>
@@ -347,7 +385,7 @@ export function Login({ onLogin, initialError, initialChoice }: {
             <button className="primary" disabled={loading}>{loading ? 'Entrando…' : 'Entrar'}</button>
           </form>
           <button type="button" className="link-button" onClick={() => { setMode('recover'); setError('') }}>Esqueci minha senha</button>
-          <button type="button" className="link-button" onClick={() => { setMode('email'); setError('') }}>Entrar com e-mail</button>
+          <button type="button" className="link-button" onClick={() => { setMode('email'); setError('') }}>{branding ? 'Sou da equipe e entro com e-mail' : 'Entrar com e-mail'}</button>
         </>}
 
         {mode === 'recover' && <>
@@ -367,7 +405,7 @@ export function Login({ onLogin, initialError, initialChoice }: {
 export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   const isClient = user.role === 'client'
   const [tab, setTab] = useState<'agenda' | 'new' | 'config' | 'hours' | 'profile'>('agenda')
-  const [configView, setConfigView] = useState<'menu' | 'agenda' | 'tenant' | 'services' | 'professionals' | 'clients' | 'reports'>('menu')
+  const [configView, setConfigView] = useState<'menu' | 'agenda' | 'tenant' | 'branding' | 'services' | 'professionals' | 'clients' | 'reports'>('menu')
   const [offset, setOffset] = useState(0)
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [services, setServices] = useState<Service[]>([])
@@ -395,6 +433,9 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
   }, [bounds, isClient])
 
   useEffect(() => { void load() }, [load])
+  // Everyone inside a barbershop (manager, professional, client) sees its
+  // brand, whichever URL they came in through.
+  useEffect(() => { if (tenant) applyTheme(tenant.color_scheme) }, [tenant])
 
   async function changeStatus(item: Appointment, status: Appointment['status']) {
     try { await api.updateStatus(item.id, status); await load() }
@@ -409,7 +450,10 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
 
   return <div className="app-shell wide">
     <header>
-      <div><span className="eyebrow">BARBERFLOW</span><h1>Sua agenda</h1></div>
+      <div className="brand-title">
+        {tenant?.logo_url && <img className="brand-logo" src={tenant.logo_url} alt={`Logo da ${tenant.name}`} />}
+        <div><span className="eyebrow">{tenant ? tenant.name.toUpperCase() : 'BARBERFLOW'}</span><h1>Sua agenda</h1></div>
+      </div>
       <button className="avatar" title={`${user.name} · Perfil`} onClick={() => setTab('profile')}>{user.name.slice(0, 2).toUpperCase()}</button>
     </header>
 
@@ -471,6 +515,7 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
         {configView === 'menu' && <ConfigMenu onSelect={setConfigView} />}
         {configView === 'agenda' && <TenantConfig tenant={tenant} onSaved={t => setTenant(t)} onBack={() => setConfigView('menu')} />}
         {configView === 'tenant' && <TenantAccount tenant={tenant} onSaved={t => setTenant(t)} onBack={() => setConfigView('menu')} />}
+        {configView === 'branding' && <BrandingConfig tenant={tenant} onSaved={t => setTenant(t)} onBack={() => setConfigView('menu')} />}
         {configView === 'services' && <ServicesManager services={services} onCreated={s => setServices(v => [...v, s])}
           onUpdated={s => setServices(v => v.map(x => x.id === s.id ? s : x))} onBack={() => setConfigView('menu')} />}
         {configView === 'professionals' && <ProfessionalsManager professionals={professionals} services={services} onCreated={p => setProfessionals(v => [...v, p])}
@@ -498,10 +543,11 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
   </div>
 }
 
-export function ConfigMenu({ onSelect }: { onSelect: (view: 'agenda' | 'tenant' | 'services' | 'professionals' | 'clients' | 'reports') => void }) {
+export function ConfigMenu({ onSelect }: { onSelect: (view: 'agenda' | 'tenant' | 'branding' | 'services' | 'professionals' | 'clients' | 'reports') => void }) {
   return <section className="form-page"><span className="eyebrow">CONFIGURAÇÕES</span><h2>Config</h2>
     <ul className="tenant-list">
       <li role="button" tabIndex={0} onClick={() => onSelect('tenant')}><div><b>Barbearia</b><small>Nome, slug e dados da conta</small></div></li>
+      <li role="button" tabIndex={0} onClick={() => onSelect('branding')}><div><b>Identidade visual</b><small>Cores e logo da sua página</small></div></li>
       <li role="button" tabIndex={0} onClick={() => onSelect('agenda')}><div><b>Agenda</b><small>Autoagendamento e confirmação</small></div></li>
       <li role="button" tabIndex={0} onClick={() => onSelect('services')}><div><b>Serviços</b><small>Cadastro de serviços</small></div></li>
       <li role="button" tabIndex={0} onClick={() => onSelect('professionals')}><div><b>Profissionais</b><small>Cadastro de profissionais</small></div></li>
@@ -656,7 +702,9 @@ export function TenantAccount({ tenant, onSaved, onBack }: { tenant: Tenant; onS
         </span>
         {nameStatus === 'taken' && <small className="field-error">Nome já em uso</small>}
       </label>
-      <label>Slug (usado em links de cadastro)<input required value={slug} onChange={e => setSlug(e.target.value.toLowerCase())} /></label>
+      <label>Slug (endereço da sua página e links de cadastro)<input required value={slug} onChange={e => setSlug(e.target.value.toLowerCase())} />
+        <small>Sua página fica em {window.location.origin}/{slug || '…'}. Trocar o slug muda esse endereço, e o link antigo deixa de funcionar.</small>
+      </label>
       <label>Fuso horário
         <select value={timezone} onChange={e => setTimezone(e.target.value)}>
           {!brazilTimezones.some(zone => zone.value === tenant.timezone) && <option value={tenant.timezone}>{tenant.timezone}</option>}

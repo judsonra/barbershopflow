@@ -1,4 +1,4 @@
-import type { AdminCustomerMatch, Appointment, Customer, CustomerPage, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
+import type { AdminCustomerMatch, PublicTenant, Appointment, Customer, CustomerPage, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
 
 const ACCESS_KEY = 'bf_access_token'
 const REFRESH_KEY = 'bf_refresh_token'
@@ -107,7 +107,8 @@ export const api = {
   isAuthenticated: () => Boolean(getAccessToken()),
   onSessionExpired: (handler: () => void) => { sessionExpiredHandler = handler },
   consumeOAuthRedirect,
-  socialLoginUrl: (provider: 'google' | 'facebook') => `/api/v1/auth/${provider}/start`,
+  socialLoginUrl: (provider: 'google' | 'facebook', tenantSlug?: string) =>
+    `/api/v1/auth/${provider}/start${tenantSlug ? `?tenant=${encodeURIComponent(tenantSlug)}` : ''}`,
   login: (email: string, password: string) => loginRequest({ email, password }),
   checkTenantName: (name: string) => request<{ available: boolean }>(`/tenants/availability?name=${encodeURIComponent(name)}`),
   createTenant: async (data: { tenant_name: string; slug: string; manager_name: string; email: string; password: string }) => {
@@ -146,6 +147,13 @@ export const api = {
   tenant: () => request<Tenant>('/tenant'),
   updateTenant: (data: { name: string; slug: string; self_scheduling_enabled: boolean; auto_confirm_appointments: boolean; cancellation_window_hours: number; timezone: string }) =>
     request<Tenant>('/tenant', { method: 'PATCH', body: JSON.stringify(data) }),
+  publicTenant: (slug: string) => request<PublicTenant>(`/public/tenants/${encodeURIComponent(slug)}`, undefined, false),
+  updateBranding: (colorScheme: string) =>
+    request<Tenant>('/tenant/branding', { method: 'PATCH', body: JSON.stringify({ color_scheme: colorScheme }) }),
+  // Raw bytes, not JSON: the backend sniffs the real image type itself.
+  uploadLogo: (file: Blob) =>
+    request<Tenant>('/tenant/logo', { method: 'PUT', body: file, headers: { 'Content-Type': file.type || 'application/octet-stream' } }),
+  deleteLogo: () => request<Tenant>('/tenant/logo', { method: 'DELETE' }),
   holidays: () => request<Holiday[]>('/tenant/holidays'),
   createHoliday: (data: { date: string; name?: string }) =>
     request<Holiday>('/tenant/holidays', { method: 'POST', body: JSON.stringify(data) }),
