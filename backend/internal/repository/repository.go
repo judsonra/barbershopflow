@@ -1392,3 +1392,37 @@ func (r *Repository) SetProfessionalCommissions(ctx context.Context, tenantID, p
 	}
 	return entries, nil
 }
+
+// ListCommissionLines returns every completed appointment in [from, to) with
+// its professional and the commission rule currently set for that
+// professional+service (nil when there is none). professionalID "" means all.
+func (r *Repository) ListCommissionLines(ctx context.Context, tenantID, professionalID string, from, to time.Time) ([]domain.CommissionLine, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT a.professional_id, p.name, a.price_cents, a.service_id, c.type, c.value
+		FROM appointments a
+		JOIN professionals p ON p.id = a.professional_id AND p.tenant_id = a.tenant_id
+		LEFT JOIN professional_commissions c
+		  ON c.tenant_id = a.tenant_id AND c.professional_id = a.professional_id AND c.service_id = a.service_id
+		WHERE a.tenant_id=$1 AND a.status='completed' AND a.starts_at>=$2 AND a.starts_at<$3
+		  AND ($4 = '' OR a.professional_id::text = $4)
+		ORDER BY p.name, a.professional_id, a.starts_at`, tenantID, from, to, professionalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	lines := []domain.CommissionLine{}
+	for rows.Next() {
+		var line domain.CommissionLine
+		var serviceID string
+		var ruleType *string
+		var ruleValue *int64
+		if err := rows.Scan(&line.ProfessionalID, &line.ProfessionalName, &line.PriceCents, &serviceID, &ruleType, &ruleValue); err != nil {
+			return nil, err
+		}
+		if ruleType != nil && ruleValue != nil {
+			line.Rule = &domain.ProfessionalCommission{ServiceID: serviceID, Type: *ruleType, Value: *ruleValue}
+		}
+		lines = append(lines, line)
+	}
+	return lines, rows.Err()
+}

@@ -33,7 +33,8 @@ type fakeStore struct {
 	identities  map[string]domain.Identity
 	memberships map[string]domain.User
 	tenants     map[string]domain.Tenant
-	logos       map[string]fakeLogo // by tenantID
+	logos       map[string]fakeLogo                        // by tenantID
+	commissions map[string][]domain.ProfessionalCommission // by tenantID+"/"+professionalID
 
 	membershipOptions map[string][]domain.MembershipOption // by identityID
 	audits            []domain.ImpersonationAudit
@@ -67,6 +68,7 @@ func newFakeStore() *fakeStore {
 		memberships:       map[string]domain.User{},
 		tenants:           map[string]domain.Tenant{},
 		logos:             map[string]fakeLogo{},
+		commissions:       map[string][]domain.ProfessionalCommission{},
 		membershipOptions: map[string][]domain.MembershipOption{},
 		errs:              map[string]error{},
 	}
@@ -943,8 +945,65 @@ func (s *fakeStore) SetProfessionalServices(_ context.Context, tenantID, profess
 }
 
 func (s *fakeStore) ListProfessionalCommissions(_ context.Context, tenantID, professionalID string) ([]domain.ProfessionalCommission, error) {
-	return []domain.ProfessionalCommission{}, nil
+	if err := s.err("ListProfessionalCommissions"); err != nil {
+		return nil, err
+	}
+	if _, ok := s.professionals[tenantID][professionalID]; !ok {
+		return nil, domain.ErrNotFound
+	}
+	out := append([]domain.ProfessionalCommission{}, s.commissions[tenantID+"/"+professionalID]...)
+	return out, nil
 }
+
+// SetProfessionalCommissions mirrors the repository: full replace, scoped to
+// the tenant, 404 for a professional or service from another barbershop.
 func (s *fakeStore) SetProfessionalCommissions(_ context.Context, tenantID, professionalID string, entries []domain.ProfessionalCommission) ([]domain.ProfessionalCommission, error) {
+	if err := s.err("SetProfessionalCommissions"); err != nil {
+		return nil, err
+	}
+	if _, ok := s.professionals[tenantID][professionalID]; !ok {
+		return nil, domain.ErrNotFound
+	}
+	for _, entry := range entries {
+		if _, ok := s.services[tenantID][entry.ServiceID]; !ok {
+			return nil, domain.ErrNotFound
+		}
+	}
+	s.commissions[tenantID+"/"+professionalID] = append([]domain.ProfessionalCommission{}, entries...)
 	return entries, nil
+}
+
+func (s *fakeStore) ListCommissionLines(_ context.Context, tenantID, professionalID string, from, to time.Time) ([]domain.CommissionLine, error) {
+	if err := s.err("ListCommissionLines"); err != nil {
+		return nil, err
+	}
+	appointments := make([]domain.Appointment, 0)
+	for _, a := range s.appointments[tenantID] {
+		if a.Status != domain.StatusCompleted || a.StartsAt.Before(from) || !a.StartsAt.Before(to) {
+			continue
+		}
+		if professionalID != "" && a.ProfessionalID != professionalID {
+			continue
+		}
+		appointments = append(appointments, a)
+	}
+	sort.Slice(appointments, func(i, j int) bool {
+		pi, pj := s.professionals[tenantID][appointments[i].ProfessionalID].Name, s.professionals[tenantID][appointments[j].ProfessionalID].Name
+		if pi != pj {
+			return pi < pj
+		}
+		return appointments[i].StartsAt.Before(appointments[j].StartsAt)
+	})
+	lines := make([]domain.CommissionLine, 0, len(appointments))
+	for _, a := range appointments {
+		line := domain.CommissionLine{ProfessionalID: a.ProfessionalID, ProfessionalName: s.professionals[tenantID][a.ProfessionalID].Name, PriceCents: a.PriceCents}
+		for _, rule := range s.commissions[tenantID+"/"+a.ProfessionalID] {
+			if rule.ServiceID == a.ServiceID {
+				rule := rule
+				line.Rule = &rule
+			}
+		}
+		lines = append(lines, line)
+	}
+	return lines, nil
 }

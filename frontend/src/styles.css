@@ -142,3 +142,6 @@ details { border: 1px dashed #c8bda9; border-radius: 11px; padding: 11px; }summa
 .access-result pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font: inherit; font-size: 13px; background: white; border-radius: 8px; padding: 10px; }
 .change-password { margin-top: 18px; }
 .change-password h3 { margin: 0; font-size: 16px; }
+/* Comissões em Relatórios e na aba do profissional. */
+.commissions-report { margin-top: 8px; }
+.form-page .hint, .commissions-report .hint { color: #7b8290; font-size: 12px; }

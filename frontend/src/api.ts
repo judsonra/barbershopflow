@@ -1,4 +1,4 @@
-import type { AccessChannel, AccessGrant, AdminCustomerMatch, PublicTenant, Appointment, Customer, CustomerPage, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalCommission, ProfessionalService, Report, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
+import type { AccessChannel, AccessGrant, AdminCustomerMatch, PublicTenant, Appointment, Customer, CustomerPage, Holiday, ImpersonationAuditEntry, MembershipOption, CommissionReport, Professional, ProfessionalCommission, ProfessionalService, Report, ScheduleEntry, Service, Tenant, TimeOff, User } from './types'
 
 const ACCESS_KEY = 'bf_access_token'
 const REFRESH_KEY = 'bf_refresh_token'
@@ -193,6 +193,9 @@ export const api = {
     request<Customer>(`/customers/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   appointments: (from: string, to: string) => request<Appointment[]>(`/appointments?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
   report: (from: string, to: string) => request<Report>(`/reports?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+  // Manager: every professional. Professional: only their own line.
+  commissionReport: (from: string, to: string) =>
+    request<CommissionReport>(`/reports/commissions?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
   createAppointment: (data: object) => request<Appointment>('/appointments', { method: 'POST', body: JSON.stringify(data) }),
   updateStatus: (id: string, status: Appointment['status']) =>
     request<Appointment>(`/appointments/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) })

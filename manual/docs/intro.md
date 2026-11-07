@@ -16,4 +16,5 @@ muda. Por enquanto, você encontra aqui:
 - [Personalizar a identidade visual](barbearia/identidade-visual.md)
 - [Dar acesso ao app para um profissional](barbearia/acesso-profissional.md)
 - [Alterar minha senha](barbearia/alterar-senha.md)
+- [Comissões dos profissionais](barbearia/comissoes.md)
 - [Definir o fuso horário da barbearia](barbearia/fuso-horario.md)

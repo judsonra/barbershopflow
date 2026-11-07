@@ -202,6 +202,19 @@ Cada barbearia liga essas duas configurações independentemente (`GET`/`PATCH
    que o cliente não apareceu, para diferenciar de um cancelamento
    avisado com antecedência (útil para relatórios futuros).
 
+### Comissões
+
+1. O gestor define, por profissional e por serviço, um **percentual** (0 a
+   100% do valor cobrado no atendimento) ou um **valor fixo** por
+   atendimento. Serviço sem regra não gera comissão.
+2. Só atendimentos **concluídos** geram comissão, sobre o preço registrado
+   no atendimento (já com o preço especial do profissional, se houver).
+3. O cálculo usa as regras vigentes no momento da consulta: mudar uma regra
+   recalcula também períodos passados. Guardar a regra de cada atendimento
+   (para fechamentos imutáveis) fica para uma versão futura.
+4. O gestor vê as comissões de todos em Relatórios. O profissional vê só as
+   dele na aba Comissões. Clientes não veem comissões.
+
 ### Relatórios
 
 `GET /api/v1/reports?from=&to=` (só `manager`) agrega três métricas sobre

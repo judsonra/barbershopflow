@@ -41,3 +41,8 @@ export type AccessChannel = 'whatsapp' | 'sms' | 'email' | 'manual'
 // password/login/login_url only come back for the 'manual' channel.
 export type AccessGrant = { message: string; password?: string; login?: string; login_url?: string }
 export type ProfessionalCommission = { service_id: string; type: 'percentage' | 'fixed'; value: number }
+export type CommissionSummary = {
+  professional_id: string; professional_name: string; appointments: number
+  revenue_cents: number; commission_cents: number; without_rule: number
+}
+export type CommissionReport = { from: string; to: string; total_commission_cents: number; items: CommissionSummary[] }

@@ -455,3 +455,76 @@ type ProfessionalCommission struct {
 	Type      string `json:"type"`
 	Value     int64  `json:"value"`
 }
+
+const (
+	CommissionPercentage = "percentage"
+	CommissionFixed      = "fixed"
+)
+
+// CommissionCents is what a professional earns on one completed appointment
+// charged priceCents: a percentage of the price (Value in hundredths of a
+// percent, rounded half up to the cent) or a fixed amount. No rule earns 0.
+func CommissionCents(priceCents int64, rule *ProfessionalCommission) int64 {
+	if rule == nil {
+		return 0
+	}
+	if rule.Type == CommissionFixed {
+		return rule.Value
+	}
+	return (priceCents*rule.Value + 5000) / 10000
+}
+
+// CommissionSummary is one professional's line in the commissions report.
+// WithoutRule counts completed appointments whose service had no
+// commission set for that professional (they add revenue but no commission).
+type CommissionSummary struct {
+	ProfessionalID   string `json:"professional_id"`
+	ProfessionalName string `json:"professional_name"`
+	Appointments     int    `json:"appointments"`
+	RevenueCents     int64  `json:"revenue_cents"`
+	CommissionCents  int64  `json:"commission_cents"`
+	WithoutRule      int    `json:"without_rule"`
+}
+
+// CommissionReport covers completed appointments in [From, To), priced with
+// the commission rules in force now (not a snapshot from when it happened).
+type CommissionReport struct {
+	From                 time.Time           `json:"from"`
+	To                   time.Time           `json:"to"`
+	TotalCommissionCents int64               `json:"total_commission_cents"`
+	Items                []CommissionSummary `json:"items"`
+}
+
+// CommissionLine is one completed appointment with the rule (if any) for
+// its professional+service — the raw input the report is summed from.
+type CommissionLine struct {
+	ProfessionalID   string
+	ProfessionalName string
+	PriceCents       int64
+	Rule             *ProfessionalCommission
+}
+
+// SummarizeCommissions groups lines by professional, keeping first-seen
+// order (the query sorts by professional name).
+func SummarizeCommissions(from, to time.Time, lines []CommissionLine) CommissionReport {
+	report := CommissionReport{From: from, To: to, Items: []CommissionSummary{}}
+	index := map[string]int{}
+	for _, line := range lines {
+		i, ok := index[line.ProfessionalID]
+		if !ok {
+			i = len(report.Items)
+			index[line.ProfessionalID] = i
+			report.Items = append(report.Items, CommissionSummary{ProfessionalID: line.ProfessionalID, ProfessionalName: line.ProfessionalName})
+		}
+		item := &report.Items[i]
+		item.Appointments++
+		item.RevenueCents += line.PriceCents
+		commission := CommissionCents(line.PriceCents, line.Rule)
+		item.CommissionCents += commission
+		report.TotalCommissionCents += commission
+		if line.Rule == nil {
+			item.WithoutRule++
+		}
+	}
+	return report
+}

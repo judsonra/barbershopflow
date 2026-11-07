@@ -103,6 +103,8 @@ senha quando a identidade é realmente nova.
 | DELETE | `/professionals/{id}/time-off/{blockId}` | Remove um bloqueio | `manager` ou o próprio `professional` |
 | GET | `/professionals/{id}/services` | Especialidades do profissional (serviços habilitados + overrides) | qualquer papel |
 | PUT | `/professionals/{id}/services` | Substitui o conjunto de especialidades inteiro | `manager` |
+| GET | `/professionals/{id}/commissions` | Regras de comissão do profissional, por serviço | `manager` |
+| PUT | `/professionals/{id}/commissions` | Substitui as regras de comissão inteiras (`{"entries":[...]}`) | `manager` |
 | POST | `/professionals/{id}/credentials` | Concede/renova acesso de um profissional (WhatsApp, SMS, e-mail ou senha mostrada ao gestor) | `manager` |
 | GET | `/customers?page=&limit=` | Lista clientes, paginado (opcional) | `manager` ou `professional` |
 | POST | `/customers` | Cria cliente | `manager` ou `professional` |
@@ -125,6 +127,7 @@ senha quando a identidade é realmente nova.
 | POST | `/appointments` | Cria agendamento; `client` só se autoagendamento estiver ligado, ver "Autoagendamento" | qualquer papel |
 | PATCH | `/appointments/{id}/status` | Altera estado (`confirmed`/`completed`/`cancelled`/`no_show`) | `manager`/`professional` (profissional só no próprio agendamento); `client` só `cancelled` no próprio, dentro do prazo — ver "Política de cancelamento" |
 | GET | `/reports?from=&to=` | Ocupação, faturamento e retenção agregados no período (padrão: mês corrente) | `manager` |
+| GET | `/reports/commissions?from=&to=` | Comissão por profissional no período (gestor: todos; profissional: só ele) | `manager` ou `professional` |
 
 Exemplo de login por e-mail:
 
@@ -464,3 +467,40 @@ Erros seguem o formato:
 ```json
 { "error": { "code": "schedule_conflict", "message": "..." } }
 ```
+
+## Comissões
+
+Regra por profissional e serviço, cadastrada pelo gestor em
+`PUT /professionals/{id}/commissions` (full replace):
+
+```json
+{ "entries": [
+  { "service_id": "…", "type": "percentage", "value": 4000 },
+  { "service_id": "…", "type": "fixed", "value": 1500 }
+] }
+```
+
+- `percentage`: `value` em centésimos de ponto percentual (`4000` = 40%),
+  de 0 a 10000.
+- `fixed`: `value` em centavos por atendimento (`1500` = R$ 15,00), não
+  negativo.
+- Lista vazia remove todas as regras; serviço fora da lista fica sem
+  comissão. Tipo inválido, percentual acima de 100%, valor negativo, serviço
+  repetido ou vazio → `400`; serviço ou profissional de outra barbearia →
+  `404`.
+
+`GET /reports/commissions?from=&to=` (período igual ao de `GET /reports`)
+soma os atendimentos `completed` do período:
+
+```json
+{ "from": "…", "to": "…", "total_commission_cents": 2000,
+  "items": [{ "professional_id": "…", "professional_name": "Ana",
+              "appointments": 2, "revenue_cents": 8000,
+              "commission_cents": 2000, "without_rule": 1 }] }
+```
+
+Comissão de cada atendimento = `price_cents × value / 10000` (arredondado
+ao centavo) ou o valor fixo; sem regra para aquele serviço, 0 (contado em
+`without_rule`). O cálculo usa as regras **atuais**: alterar uma regra muda
+também o resultado de períodos passados. Gestor vê todos os profissionais;
+profissional vê só a própria linha; cliente → `403`.

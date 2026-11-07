@@ -6,6 +6,7 @@ import { downloadICS, googleCalendarUrl } from './calendar'
 import { applyTheme, forgetSessionTheme, rememberSessionTheme, rememberSlugTheme, tenantSlugFromPath } from './branding'
 import { BrandingConfig } from './BrandingConfig'
 import { ProfessionalAccess } from './ProfessionalAccess'
+import { CommissionsSection, MyCommissions } from './CommissionsReport'
 import { fromE164BR, isValidCPF, isValidEmail, maskCPF, maskPhone, toE164BR } from './validation'
 import type { PublicTenant, AdminCustomerMatch, Appointment, Customer, Holiday, ImpersonationAuditEntry, MembershipOption, Professional, ProfessionalService, Report, Service, Tenant, TimeOff, User } from './types'
 
@@ -454,7 +455,7 @@ export function Login({ onLogin, initialError, initialChoice, branding }: {
 
 export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void }) {
   const isClient = user.role === 'client'
-  const [tab, setTab] = useState<'agenda' | 'new' | 'config' | 'hours' | 'profile'>('agenda')
+  const [tab, setTab] = useState<'agenda' | 'new' | 'config' | 'hours' | 'commissions' | 'profile'>('agenda')
   const [configView, setConfigView] = useState<'menu' | 'agenda' | 'tenant' | 'branding' | 'services' | 'professionals' | 'clients' | 'reports'>('menu')
   const [offset, setOffset] = useState(0)
   const [appointments, setAppointments] = useState<Appointment[]>([])
@@ -581,6 +582,7 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
         {configView === 'reports' && <ReportsView onBack={() => setConfigView('menu')} />}
       </>}
       {tab === 'hours' && <ScheduleManager user={user} professionals={professionals} />}
+      {tab === 'commissions' && user.role === 'professional' && <MyCommissions />}
       {tab === 'profile' && <Profile user={user} onLogout={onLogout} onBack={() => setTab('agenda')} />}
     </main>
 
@@ -593,6 +595,8 @@ export function AgendaApp({ user, onLogout }: { user: User; onLogout: () => void
         <button className={tab === 'new' ? 'active add' : 'add'} onClick={() => setTab('new')}><span>＋</span>Novo</button>}
       {!isClient &&
         <button className={tab === 'hours' ? 'active' : ''} onClick={() => setTab('hours')}><span>🕘</span>Horários</button>}
+      {user.role === 'professional' &&
+        <button className={tab === 'commissions' ? 'active' : ''} onClick={() => setTab('commissions')}><span>💰</span>Comissões</button>}
       {user.role === 'manager' &&
         <button className={tab === 'config' ? 'active' : ''} onClick={() => { setTab('config'); setConfigView('menu') }}><span>⚙</span>Config</button>}
     </nav>
@@ -1276,6 +1280,7 @@ export function ReportsView({ onBack }: { onBack: () => void }) {
       <h3>Retenção</h3>
       <p>{report.retention.returning_customers} de {report.retention.total_customers} clientes atendidos já eram clientes antes do período (<b>{(report.retention.rate * 100).toFixed(0)}%</b>).</p>
     </>}
+    <CommissionsSection from={from} to={to} />
     <button type="button" className="link-button" onClick={onBack}>Voltar</button>
   </section>
 }

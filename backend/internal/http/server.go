@@ -83,6 +83,7 @@ type Store interface {
 	DeleteTimeOff(ctx context.Context, tenantID, professionalID, id string) error
 	ListProfessionalCommissions(ctx context.Context, tenantID, professionalID string) ([]domain.ProfessionalCommission, error)
 	SetProfessionalCommissions(ctx context.Context, tenantID, professionalID string, entries []domain.ProfessionalCommission) ([]domain.ProfessionalCommission, error)
+	ListCommissionLines(ctx context.Context, tenantID, professionalID string, from, to time.Time) ([]domain.CommissionLine, error)
 
 	ListProfessionalServices(ctx context.Context, tenantID, professionalID string) ([]domain.ProfessionalService, error)
 	SetProfessionalServices(ctx context.Context, tenantID, professionalID string, entries []domain.ProfessionalService) ([]domain.ProfessionalService, error)
@@ -170,6 +171,7 @@ func New(store Store, cfg Config) http.Handler {
 	protected.HandleFunc("POST /api/v1/customers/{id}/credentials", s.requireStaff(s.grantCustomerAccess))
 	protected.HandleFunc("GET /api/v1/appointments", s.listAppointments)
 	protected.HandleFunc("GET /api/v1/reports", s.requireRole(domain.RoleManager, s.getReport))
+	protected.HandleFunc("GET /api/v1/reports/commissions", s.getCommissionReport)
 	protected.HandleFunc("POST /api/v1/appointments", s.createAppointment)
 	protected.HandleFunc("PATCH /api/v1/appointments/{id}/status", s.updateStatus)
 
@@ -1584,25 +1586,65 @@ func (s *server) listAppointments(w http.ResponseWriter, r *http.Request) {
 // midnight in the barbershop's zone, so a period matches its local calendar.
 func (s *server) getReport(w http.ResponseWriter, r *http.Request) {
 	claims, _ := claimsFromContext(r)
-	tenant, err := s.store.GetTenantByID(r.Context(), claims.TenantID)
+	from, to, ok := s.reportPeriod(w, r, claims.TenantID)
+	if !ok {
+		return
+	}
+	report, err := s.store.GetReport(r.Context(), claims.TenantID, from, to)
+	respond(w, report, err)
+}
+
+// reportPeriod reads ?from=&to= for the reports: defaults to the current
+// month, and plain AAAA-MM-DD dates mean midnight in the barbershop's zone.
+func (s *server) reportPeriod(w http.ResponseWriter, r *http.Request, tenantID string) (time.Time, time.Time, bool) {
+	tenant, err := s.store.GetTenantByID(r.Context(), tenantID)
 	if err != nil {
 		handleError(w, err)
-		return
+		return time.Time{}, time.Time{}, false
 	}
 	location := tenant.Location()
 	now := time.Now().In(location)
 	from, err := parseDayOrTime(r.URL.Query().Get("from"), time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, location), location)
 	if err != nil {
 		writeError(w, 400, "validation_error", "from inválido")
-		return
+		return time.Time{}, time.Time{}, false
 	}
 	to, err := parseDayOrTime(r.URL.Query().Get("to"), from.AddDate(0, 1, 0), location)
 	if err != nil || !to.After(from) {
 		writeError(w, 400, "validation_error", "to inválido")
+		return time.Time{}, time.Time{}, false
+	}
+	return from, to, true
+}
+
+// getCommissionReport sums commissions over completed appointments in the
+// period. Managers see every professional; a professional sees only their
+// own line (the "Comissões" tab); clients can't see it at all.
+func (s *server) getCommissionReport(w http.ResponseWriter, r *http.Request) {
+	claims, _ := claimsFromContext(r)
+	professionalID := ""
+	switch claims.Role {
+	case domain.RoleManager:
+	case domain.RoleProfessional:
+		professionalID = claims.ProfessionalID
+		if professionalID == "" {
+			writeError(w, http.StatusForbidden, "forbidden", "sem permissão")
+			return
+		}
+	default:
+		writeError(w, http.StatusForbidden, "forbidden", "sem permissão")
 		return
 	}
-	report, err := s.store.GetReport(r.Context(), claims.TenantID, from, to)
-	respond(w, report, err)
+	from, to, ok := s.reportPeriod(w, r, claims.TenantID)
+	if !ok {
+		return
+	}
+	lines, err := s.store.ListCommissionLines(r.Context(), claims.TenantID, professionalID, from, to)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, domain.SummarizeCommissions(from, to, lines))
 }
 
 // createAppointment is shared by staff (booking for any customer, always
@@ -1822,7 +1864,7 @@ func (s *server) setProfessionalCommissions(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		seen[entry.ServiceID] = true
-		if (entry.Type != "fixed" && entry.Type != "percentage") || entry.Value < 0 || (entry.Type == "percentage" && entry.Value > 10000) {
+		if (entry.Type != domain.CommissionFixed && entry.Type != domain.CommissionPercentage) || entry.Value < 0 || (entry.Type == domain.CommissionPercentage && entry.Value > 10000) {
 			writeError(w, http.StatusBadRequest, "validation_error", "Comissão inválida: use valor positivo ou percentual entre 0 e 100")
 			return
 		}
